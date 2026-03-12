@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Tableau Freezer Extension</title>
+    <script src="https://cdn.jsdelivr.net/gh/tableau/extensions-api@master/lib/tableau.extensions.1.latest.js"></script>
+    <style>
+        body { margin: 0; padding: 10px; font-family: 'Segoe UI', sans-serif; background: #fff; overflow: hidden; }
+        .container { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+        .btn { 
+            background: #007A41; color: white; border: none; padding: 14px; 
+            width: 100%; border-radius: 6px; cursor: pointer; font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; font-size: 14px;
+        }
+        .btn:hover { background: #2CA25F; }
+        .btn:disabled { background: #abbbc6; }
+        #status { font-size: 12px; text-align: center; color: #555; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="user-info" style="font-size: 11px; color: #888;">Определение пользователя...</div>
+        <button id="freezeBtn" class="btn" disabled>ПОДГОТОВИТЬ СРЕЗ</button>
+        <div id="status">Инициализация...</div>
+    </div>
+
+<script>
+    async function getSourceTables() {
+        const dashboard = tableau.extensions.dashboardContent.dashboard;
+        let tableNames = new Set();
+        for (const sheet of dashboard.worksheets) {
+            const dataSources = await sheet.getDataSourcesAsync();
+            for (const ds of dataSources) {
+                const logicalTables = await ds.getLogicalTablesAsync();
+                logicalTables.forEach(t => tableNames.add(t.caption || t.name));
+            }
+        }
+        return Array.from(tableNames);
+    }
+
+    tableau.extensions.initializeAsync().then(async function () {
+        const btn = document.getElementById('freezeBtn');
+        const status = document.getElementById('status');
+        const userBadge = document.getElementById('user-info');
+        
+        const tableauUser = tableau.extensions.environment.username || "tabladmin";
+        //const tableauUser = tableau.extensions.environment.username || "local";
+        //const tableauUser = tableau.extensions.environment.username || "ID";
+        userBadge.innerText = `Пользователь: ${tableauUser}`;
+        
+        btn.disabled = false;
+        status.innerText = "Готов к работе";
+
+        btn.onclick = async function() {
+            btn.disabled = true;
+            status.innerText = "Сбор параметров...";
+            
+            const dashboard = tableau.extensions.dashboardContent.dashboard;
+            const parameters = await dashboard.getParametersAsync();
+            
+            // Собираем все параметры
+            let currentParams = {};
+            parameters.forEach(p => {
+                currentParams[p.name] = p.currentValue.formattedValue;
+            });
+
+            // Пытаемся найти даты периода для метаданных
+            const pStart = currentParams['DateStart'] || currentParams['Дата начала периода'] || "01.01.2025";
+            const pEnd = currentParams['DateEnd'] || currentParams['Дата окончания периода'] || "31.01.2025";
+
+            const payload = {
+                user: tableauUser,
+                dashboard: dashboard.name,
+                initiator_user: tableauUser,
+                period_start: pStart,
+                period_end: pEnd,
+                params: currentParams
+            };
+
+            const dialogUrl = window.location.origin + '/static/dialog.html';
+            tableau.extensions.ui.displayDialogAsync(dialogUrl, JSON.stringify(payload), { height: 650, width: 500 })
+                .then((msg) => status.innerText = "✅ " + msg)
+                .finally(() => btn.disabled = false);
+        };
+    });
+</script>
+</body>
+</html>

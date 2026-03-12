@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Extension Freezer Workflow</title>
+    <script src="https://cdn.jsdelivr.net/gh/tableau/extensions-api@master/lib/tableau.extensions.1.latest.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; background-color: #f8f9fa; color: #333; }
+        .header { background: #007A41; color: white; padding: 15px 20px; }
+        .header h2 { margin: 0; font-size: 16px; }
+        .content { padding: 15px; padding-bottom: 80px; }
+        .section-title { font-size: 11px; font-weight: bold; color: #888; text-transform: uppercase; margin-bottom: 10px; display: flex; justify-content: space-between; }
+        .card { background: white; border-radius: 8px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 15px; border-left: 4px solid #B4975B; }
+        .card-details { font-size: 12px; line-height: 1.5; }
+        textarea { width: 100%; height: 60px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 12px; outline: none; resize: none; box-sizing: border-box; }
+        .quick-comments { display: flex; gap: 6px; margin: 8px 0 15px 0; flex-wrap: wrap; }
+        .q-btn { background: #f0f0f0; color: #666; border: 1px solid #ddd; padding: 4px 10px; border-radius: 4px; font-size: 10px; cursor: pointer; }
+        .q-btn:hover { background: #e0e0e0; }
+        .task-item { background: #fff; border: 1px solid #eef0f2; padding: 12px; border-radius: 8px; margin-bottom: 10px; }
+        .task-meta { font-size: 10px; color: #777; margin-top: 5px; }
+        .confirm-wrapper { display: flex; align-items: center; gap: 8px; background: #fffcf5; padding: 8px; border-radius: 6px; border: 1px dashed #DCCEB5; margin-top: 8px; }
+        .footer { position: fixed; bottom: 0; width: 100%; background: #fff; padding: 12px 20px; border-top: 1px solid #eee; display: flex; gap: 10px; box-sizing: border-box; }
+        .btn { flex: 1; padding: 10px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
+        .btn-confirm { background: #007A41; color: white; }
+        .btn-confirm:disabled { background: #ccc; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h2 id="reportName">Загрузка...</h2>
+        <div style="font-size: 11px; opacity: 0.8" id="userName">👤 ...</div>
+    </div>
+
+    <div class="content">
+        <div id="initiatorView" class="hidden">
+            <div class="section-title">Параметры нового среза</div>
+            <div class="card">
+                <div class="card-details">
+                    <div id="periodInfo" style="margin-bottom: 8px; font-weight: bold; color: #007A41;"></div>
+                    <div id="reportDetails"></div>
+                </div>
+            </div>
+            
+            <label style="font-size: 12px; font-weight: 600;">Комментарий</label>
+            <textarea id="comment" placeholder="Укажите причину..."></textarea>
+            
+            <div class="quick-comments">
+                <div class="q-btn" onclick="setComment('Плановая заморозка за период.')">Плановая</div>
+                <div class="q-btn" onclick="setComment('Корректировка данных.')">Корректировка</div>
+            </div>
+        </div>
+
+        <div id="toast" class="hidden" style="background: #d4edda; color: #155724; padding: 15px; border-radius: 6px; text-align: center; margin-top: 20px;">
+            ✅ Запрос успешно отправлен!
+        </div>
+
+        <div id="approverView" class="hidden">
+            <div class="section-title">Задачи на аппрув</div>
+            <div id="tasks-container"></div>
+        </div>
+
+        <div id="loader" style="text-align: center; padding: 20px; color: #999;">⏳ Проверка статуса...</div>
+    </div>
+
+    <div class="footer">
+        <button class="btn" style="background: #eee;" onclick="tableau.extensions.ui.closeDialog('cancel')">Отмена</button>
+        <button class="btn btn-confirm hidden" id="requestBtn">Отправить запрос</button>
+        <button class="btn btn-confirm hidden" id="bulkApproveBtn" disabled onclick="processBulkApprove()">Одобрить</button>
+    </div>
+
+<script>
+    let globalPayload = {};
+    const API_BASE = "http://localhost:8000";
+
+    // Функция выбора комментария
+    function setComment(text) { document.getElementById('comment').value = text; }
+
+    tableau.extensions.initializeDialogAsync().then(function (payload) {
+        globalPayload = JSON.parse(payload);
+        document.getElementById('userName').innerText = "👤 " + globalPayload.user;
+        document.getElementById('reportName').innerText = globalPayload.dashboard;
+        checkWorkflowStatus(globalPayload.user);
+    });
+
+    async function checkWorkflowStatus(username) {
+        try {
+            const res = await fetch(`${API_BASE}/pending-tasks?user=${username}`);
+            const tasks = await res.json();
+            document.getElementById('loader').classList.add('hidden');
+
+            if (tasks.length > 0) renderApprover(tasks);
+            else renderInitiator();
+        } catch (e) { document.getElementById('loader').innerText = "Ошибка связи с API"; }
+    }
+
+    function renderInitiator() {
+        document.getElementById('initiatorView').classList.remove('hidden');
+        document.getElementById('requestBtn').classList.remove('hidden');
+        document.getElementById('periodInfo').innerText = `Период: ${globalPayload.period_start} — ${globalPayload.period_end}`;
+        
+        let details = "";
+        for (let [k, v] of Object.entries(globalPayload.params)) {
+            if (k !== 'DateStart' && k !== 'DateEnd') details += `<b>${k}:</b> ${v}<br>`;
+        }
+        document.getElementById('reportDetails').innerHTML = details;
+    }
+
+    function renderApprover(tasks) {
+        document.getElementById('approverView').classList.remove('hidden');
+        document.getElementById('bulkApproveBtn').classList.remove('hidden');
+        document.getElementById('tasks-container').innerHTML = tasks.map(t => `
+            <div class="task-item">
+                <div style="font-weight:bold; font-size:13px;">${t.REPORT_NAME}</div>
+                <div class="task-meta">
+                    Период: ${t.PERIOD}<br>
+                    Инициатор: ${t.INIT_USER}<br>
+                    ${t.COMMENT || 'Без комментария'}
+                </div>
+                <div class="confirm-wrapper">
+                    <input type="checkbox" class="task-checkbox" data-id="${t.TASK_ID}" onchange="updateBtn()">
+                    <label style="font-size:11px;">Подтверждаю корректность данных</label>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function updateBtn() {
+        const checked = document.querySelectorAll('.task-checkbox:checked');
+        document.getElementById('bulkApproveBtn').disabled = checked.length === 0;
+    }
+
+    async function processBulkApprove() {
+        const ids = Array.from(document.querySelectorAll('.task-checkbox:checked')).map(cb => cb.dataset.id);
+        if (!confirm(`Подтвердить выбранные (${ids.length})?`)) return;
+
+        for (let id of ids) {
+            await fetch(`${API_BASE}/approve-task/${id}?user=${globalPayload.user}`, { method: 'POST' });
+        }
+        tableau.extensions.ui.closeDialog("Отчет подтвержден");
+    }
+
+    document.getElementById('requestBtn').onclick = async function() {
+    const comment = document.getElementById('comment').value;
+    if (!comment) return alert("Введите комментарий!");
+    
+    this.disabled = true;
+    try {
+        const res = await fetch(`${API_BASE}/request-freeze`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ ...globalPayload, comment: comment })
+        });
+        
+        const toast = document.getElementById('toast');
+        if (toast) {
+            toast.classList.remove('hidden');
+        }
+
+        setTimeout(() => {
+            tableau.extensions.ui.closeDialog("Запрос на подтверждение отправлен");
+        }, 2000);
+
+    } catch (e) { 
+        alert("Ошибка API"); 
+        this.disabled = false; 
+    }
+};  
+</script>
+</body>
+</html>

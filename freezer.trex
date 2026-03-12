@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+  <manifest manifest-version="0.1" xmlns="http://www.tableau.com/xml/extension_manifest">
+    <dashboard-extension id="com.a2data.freezer.v1" extension-version="1.0.0">
+      <default-locale>en_US</default-locale>
+      <name resource-id="name"/>
+      <description>Extension Description</description>
+      <author name="I.D." email="USER@example.com" organization="A2DATA" website="https://www.example.com (https://www.example.com/)"/>
+      <min-api-version>1.0</min-api-version>
+      <source-location>
+        <url>http://localhost:8000/static/index.html</url>
+      </source-location>
+      <icon/>
+    <permissions>
+      <permission>full data</permission>
+    </permissions>
+    <context-menu/>
+    </dashboard-extension>
+    <resources>
+      <resource id="name">
+         <text locale="en_US">Extention Freezer</text>
+         <text locale="fr_BE">Extention Freezer</text>
+         <text locale="de_DE">Extention Freezer</text>
+      </resource>
+    </resources>
+  </manifest>

@@ -1,0 +1,17 @@
+# Окружение
+venv/
+.env
+
+# База данных (SQLite)
+*.db
+*.db-journal
+
+# Кэш Python
+__pycache__/
+*.pyc
+
+# Логи
+*.log
+
+# Локальные сертификаты
+*.pem
