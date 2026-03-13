@@ -72,7 +72,7 @@
 
 <script>
     let globalPayload = {};
-    const API_BASE = "http://localhost:8000";
+    const API_BASE = window.location.origin;
 
     // Функция выбора комментария
     function setComment(text) { document.getElementById('comment').value = text; }
@@ -136,7 +136,11 @@
         if (!confirm(`Подтвердить выбранные (${ids.length})?`)) return;
 
         for (let id of ids) {
-            await fetch(`${API_BASE}/approve-task/${id}?user=${globalPayload.user}`, { method: 'POST' });
+            const res = await fetch(`${API_BASE}/approve-task/${id}?user=${globalPayload.user}`, { method: 'POST' });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `Ошибка подтверждения задачи ${id}`);
+            }
         }
         tableau.extensions.ui.closeDialog("Отчет подтвержден");
     }
@@ -152,6 +156,10 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ ...globalPayload, comment: comment })
         });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Ошибка создания запроса');
+        }
         
         const toast = document.getElementById('toast');
         if (toast) {
@@ -163,7 +171,7 @@
         }, 2000);
 
     } catch (e) { 
-        alert("Ошибка API"); 
+        alert(e.message || "Ошибка API"); 
         this.disabled = false; 
     }
 };  

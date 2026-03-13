@@ -2,7 +2,7 @@ import sqlite3
 import uuid
 import datetime
 import json
-from report_registry import REPORTS_SQL
+from app.report_registry import REPORTS_SQL
 
 class TableauFreezer:
     def __init__(self):

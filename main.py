@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field, ConfigDict
 import uvicorn
 
 # Локальные модули
-from tableau_bd_logic import TableauFreezer
-from report_registry import REPORTS_SQL  # <--- Cправочник SQL
+from app.tableau_bd_logic import TableauFreezer
+from app.report_registry import REPORTS_SQL  # <--- Cправочник SQL
 
 app = FastAPI(title="Tableau Extension Freezer Workflow")
 
