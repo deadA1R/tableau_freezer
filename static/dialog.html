@@ -50,12 +50,11 @@
                 <div class="q-btn" onclick="setComment('Плановая заморозка за период.')">Плановая</div>
                 <div class="q-btn" onclick="setComment('Корректировка данных.')">Корректировка</div>
             </div>
-
             <label style="font-size: 12px; font-weight: 600; display: block; margin-top: 10px;">Проверяющий</label>
             <select id="approverSelect" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd; font-size: 12px; margin-top: 5px; outline: none; background: white;">
                 <option value="tabladmin">Tableau Admin</option>
                 <option value="drp_exp">Админ</option>
-                <option value="a.assetov">Ассетов Азамат</option>
+                <option value="a.assetov">Асетов Азамат</option>
                 <option value="a-iskakov">Искаков Аспандияр</option>
                 <option value="Iskakov_Aspandiyar_exp">Искаков Аспандияр (exp)</option>
             </select>
@@ -154,7 +153,7 @@
         tableau.extensions.ui.closeDialog("Отчет подтвержден");
     }
 
-   document.getElementById('requestBtn').onclick = async function() {
+    document.getElementById('requestBtn').onclick = async function() {
     const comment = document.getElementById('comment').value;
     const approver_row = document.getElementById('approverSelect').value;
     

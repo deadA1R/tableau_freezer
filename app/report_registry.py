@@ -1,10 +1,10 @@
 BASE_DETAILED_REPORT = """SELECT * FROM (
                   SELECT   
-                        '{SnapshotID}' as "SNAPSHOT_ID",
-                        '{IninUser}' as "INIT",
-                        '{ApproverUser}' as "APPROVER",
-                        '{DateStart}' AS "FREEZING_PERIOD_START",
-                        '{DateEnd}' AS "FREEZING_PERIOD_END",
+                        '{SnapshotID}'::VARCHAR(100) as "SNAPSHOT_ID",
+                        '{InitUser}'::VARCHAR(100) as "INIT",
+                        '{ApproverUser}'::VARCHAR(100) as "APPROVER",
+                        '{DateStart}'::DATE AS "FREEZING_PERIOD_START",
+                        '{DateEnd}'::DATE AS "FREEZING_PERIOD_END",
                         CURRENT_DATE as "DATE_FREEZE",
                         GETDATE() AS "LOAD_DATE",
                         "dm_limit_contract"."AMOUNT_CLOSE",
@@ -136,8 +136,8 @@ BASE_DETAILED_REPORT = """SELECT * FROM (
             ) AS final_data
             WHERE final_data."LIMIT_TOOL_CODE" = {ToolCode}
             and NOT(final_data."ORGANIZATION_NAME_LEGAL" IS NULL OR final_data."ORGANIZATION_NAME_LEGAL" = 'ЧАСТНАЯ КОМПАНИЯ BGLOBAL VENTURES LTD.')
-            AND final_data."DM_DATE" >= '{DateStart}'
-            AND final_data."DM_DATE" <= '{DateEnd}'"""
+            AND final_data."DM_DATE" >= '{DateStart}'::DATE
+            AND final_data."DM_DATE" <= '{DateEnd}'::DATE"""
 
 
 REPORTS_SQL = {
