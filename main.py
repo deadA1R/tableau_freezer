@@ -37,7 +37,7 @@ class FreezeRequest(BaseModel):
     workbook_url: Optional[str] = "local_workbook"
     
     initiator_user: Optional[str] = "unknown"
-    approver_user: Optional[str] = "tabladmin"
+    approver: Optional[str] = "tabladmin"
     period_start: Optional[str] = "N/A"
     period_end: Optional[str] = "N/A"
     

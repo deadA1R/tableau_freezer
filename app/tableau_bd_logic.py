@@ -2,6 +2,7 @@ import sqlite3
 import uuid
 import datetime
 import json
+from datetime import datetime
 from app.report_registry import REPORTS_SQL
 
 class TableauFreezer:
@@ -27,6 +28,25 @@ class TableauFreezer:
             """)
             conn.commit()
 
+    def _init_db(self):
+        schema = os.getenv('VERTICA_SCHEMA', 'DM')
+        try:
+            with self._get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Таблица воркфлоу (уже есть)
+                    cursor.execute(f"""
+                        CREATE TABLE IF NOT EXISTS {schema}.FREEZE_WORKFLOW (
+                            TASK_ID VARCHAR(50), REPORT_NAME VARCHAR(255),
+                            PERIOD VARCHAR(100), INIT_USER VARCHAR(100),
+                            APPROVER_USER VARCHAR(100), STATUS VARCHAR(20) DEFAULT 'PENDING',
+                            PARAMS_JSON LONG VARCHAR, COMMENT VARCHAR(500),
+                            DATE_CREATE TIMESTAMP, DATE_APPROVE TIMESTAMP
+                        )
+                    """)
+                   
+        except Exception as e:
+            print(f"Failed to initialize Vertica tables: {e}")
+
     def create_request(self, data: dict):
         try:
             report = data.get('dashboard', 'Unknown')
@@ -35,16 +55,29 @@ class TableauFreezer:
             d_s = params.get('DateStart') or params.get('Дата начала периода') or "all"
             d_e = params.get('DateEnd') or params.get('Дата окончания периода') or "all"
             period_key = f"{d_s}_{d_e}"
+            approver = data.get('approver', 'tabladmin') 
+            initiator = data.get('user', 'unknown')
             
             with sqlite3.connect(self.db_path) as conn:
-                exists = conn.execute("SELECT STATUS FROM FREEZE_WORKFLOW WHERE PERIOD = ? AND STATUS = 'PENDING'", (period_key,)).fetchone()
+                exists = conn.execute("""
+                            SELECT STATUS 
+                            FROM FREEZE_WORKFLOW 
+                            WHERE PERIOD = ? 
+                            AND INIT_USER = ? 
+                            AND APPROVER_USER = ? 
+                            AND STATUS = 'PENDING'
+                        """, (period_key, initiator, approver)).fetchone()
                 if exists:
                     return {"status": "exists", "message": f"Запрос уже на голосовании"}
 
                 task_id = str(uuid.uuid4())[:8]
                 
-                initiator = data.get('user', 'unknown')
-                approver = "local" if initiator != "local" else "tabladmin"
+                if initiator == approver:
+                    if initiator != "tabladmin":
+                        return {
+                            "success": False, 
+                            "message": "Ошибка безопасности: Инициатор и Аппрувер не могут совпадать."
+                        }
                 
                 conn.execute("""
                     INSERT INTO FREEZE_WORKFLOW (
@@ -54,7 +87,7 @@ class TableauFreezer:
                 """, (
                     task_id, report, period_key, initiator, 
                     approver, json.dumps(params), 
-                    data.get('COMMENT', ''), 
+                    data.get('comment', ''), 
                     datetime.datetime.now().isoformat()
                 ))
                 conn.commit()
@@ -108,17 +141,25 @@ class TableauFreezer:
 
         sql_template = base_sql.get("template")
         tool_code = base_sql.get("tool_code")
-        date_start = params.get('Дата начала периода', '2025-01-01')
-        date_end = params.get('Дата окончания периода', '2025-01-01')
+        d_start_raw = params.get('Дата начала периода', '01.01.2025')
+        d_end_raw = params.get('Дата окончания периода', '30.01.2025')
+
+        # Конвертируем формат DD.MM.YYYY -> YYYY-MM-DD
+        try:
+            date_start = datetime.strptime(d_start_raw, '%d.%m.%Y').strftime('%Y-%m-%d')
+            date_end = datetime.strptime(d_end_raw, '%d.%m.%Y').strftime('%Y-%m-%d')
+        except ValueError:
+            # Если вдруг пришло уже в YYYY-MM-DD или другом формате, оставляем как есть
+            date_start = d_start_raw
+            date_end = d_end_raw
+
+        snapshot_id = task['TASK_ID']
+        init_user = task['INIT_USER']
+        approver_user = task['APPROVER_USER']
+
+        final_query = sql_template.replace("{ToolCode}", str(tool_code)).replace("{DateStart}", date_start).replace("{DateEnd}", date_end).replace("{SnapshotID}",snapshot_id).replace("{IninUser}",init_user).replace("{ApproverUser}",approver_user)
         
-        final_query = sql_template.replace("{ToolCode}", str(tool_code)).replace("{DateStart}", date_start).replace("{DateEnd}", date_end)
-        
-        full_sql = f"""
-        INSERT INTO SANDBOX.FROZEN_DATA (SNAPSHOT_ID, INIT, APPROVER, DATE)
-        SELECT '{task['TASK_ID']}', '{task['INIT_USER']}', '{task['APPROVER_USER']}', *
-        FROM ({final_query}) AS src
-        """
-        return full_sql
+        return final_query
 
     def get_user_tasks(self, username: str):
         with sqlite3.connect(self.db_path) as conn:

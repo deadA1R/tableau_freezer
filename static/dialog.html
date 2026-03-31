@@ -50,6 +50,15 @@
                 <div class="q-btn" onclick="setComment('Плановая заморозка за период.')">Плановая</div>
                 <div class="q-btn" onclick="setComment('Корректировка данных.')">Корректировка</div>
             </div>
+
+            <label style="font-size: 12px; font-weight: 600; display: block; margin-top: 10px;">Проверяющий</label>
+            <select id="approverSelect" style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ddd; font-size: 12px; margin-top: 5px; outline: none; background: white;">
+                <option value="tabladmin">Tableau Admin</option>
+                <option value="drp_exp">Админ</option>
+                <option value="a.assetov">Ассетов Азамат</option>
+                <option value="a-iskakov">Искаков Аспандияр</option>
+                <option value="Iskakov_Aspandiyar_exp">Искаков Аспандияр (exp)</option>
+            </select>
         </div>
 
         <div id="toast" class="hidden" style="background: #d4edda; color: #155724; padding: 15px; border-radius: 6px; text-align: center; margin-top: 20px;">
@@ -145,8 +154,10 @@
         tableau.extensions.ui.closeDialog("Отчет подтвержден");
     }
 
-    document.getElementById('requestBtn').onclick = async function() {
+   document.getElementById('requestBtn').onclick = async function() {
     const comment = document.getElementById('comment').value;
+    const approver_row = document.getElementById('approverSelect').value;
+    
     if (!comment) return alert("Введите комментарий!");
     
     this.disabled = true;
@@ -154,8 +165,13 @@
         const res = await fetch(`${API_BASE}/request-freeze`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ ...globalPayload, comment: comment })
+            body: JSON.stringify({ 
+                ...globalPayload, 
+                comment: comment,
+                approver: approver_row 
+            })
         });
+
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.detail || 'Ошибка создания запроса');

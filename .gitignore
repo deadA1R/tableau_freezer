@@ -16,5 +16,4 @@ __pycache__/
 # Локальные сертификаты
 *.pem
 
-report_registry.py
 
