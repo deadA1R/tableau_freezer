@@ -365,7 +365,22 @@
         
         const filtered = allTasksCache.filter(t => {
             const matchReport = t.REPORT_NAME.toLowerCase().includes(reportVal);
-            const matchDate = !dateVal || (t.DATE_CREATE && t.DATE_CREATE.includes(dateVal));
+            let matchDate = true;
+            if (dateVal && t.PERIOD) {
+                const selectedDate = new Date(dateVal);
+                
+                const parts = t.PERIOD.split('_');
+                
+                if (parts.length === 2) {
+                    const fromParts = parts[0].split('.');
+                    const toParts = parts[1].split('.');
+                    
+                    const dateFrom = new Date(`${fromParts[2]}-${fromParts[1]}-${fromParts[0]}`);
+                    const dateTo = new Date(`${toParts[2]}-${toParts[1]}-${toParts[0]}`);
+
+                    matchDate = selectedDate >= dateFrom && selectedDate <= dateTo;
+                }
+            }
             return matchReport && matchDate;
         });
         
@@ -397,7 +412,7 @@
             const result = await res.json();
             if (res.status === 409) return alert(result.message);
             document.getElementById('toast').classList.remove('hidden');
-            setTimeout(() => location.reload(), 1500);
+            setTimeout(() => tableau.extensions.ui.closeDialog("Задача создана"), 1500);
         } catch (e) { alert("Ошибка!"); this.disabled = false; }
     };
 
@@ -408,7 +423,7 @@
             for (let id of ids) {
                 await fetch(`${API_BASE}/approve-task/${id}?user=${globalPayload.user}`, { method: 'POST' });
             }
-            location.reload();
+            tableau.extensions.ui.closeDialog("Срез подтвержден");
         } catch (e) { alert("Ошибка при подтверждении"); }
     }
 
