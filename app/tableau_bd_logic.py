@@ -2,6 +2,7 @@ import sqlite3
 import uuid
 import datetime
 import json
+import os
 from datetime import datetime
 from app.report_registry import REPORTS_SQL
 
@@ -22,13 +23,14 @@ class TableauFreezer:
                     STATUS TEXT DEFAULT 'PENDING',
                     PARAMS_JSON TEXT,      -- Параметры фильтрации
                     COMMENT TEXT,
+                    IS_ACTUAL INTEGER DEFAULT 1,
                     DATE_CREATE TEXT,
                     DATE_APPROVE TEXT       -- Время финального аппрува
                 )
             """)
             conn.commit()
 
-    def _init_db(self):
+    def _init_db_2(self):
         schema = os.getenv('VERTICA_SCHEMA', 'DM')
         try:
             with self._get_db_connection() as conn:
@@ -40,6 +42,7 @@ class TableauFreezer:
                             PERIOD VARCHAR(100), INIT_USER VARCHAR(100),
                             APPROVER_USER VARCHAR(100), STATUS VARCHAR(20) DEFAULT 'PENDING',
                             PARAMS_JSON LONG VARCHAR, COMMENT VARCHAR(500),
+                            IS_ACTUAL INTEGER,
                             DATE_CREATE TIMESTAMP, DATE_APPROVE TIMESTAMP
                         )
                     """)
@@ -59,16 +62,22 @@ class TableauFreezer:
             initiator = data.get('user', 'unknown')
             
             with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
                 exists = conn.execute("""
                             SELECT STATUS 
                             FROM FREEZE_WORKFLOW 
                             WHERE PERIOD = ? 
+                            AND REPORT_NAME = ?
                             AND INIT_USER = ? 
                             AND APPROVER_USER = ? 
-                            AND STATUS = 'PENDING'
-                        """, (period_key, initiator, approver)).fetchone()
+                            AND STATUS IN ('PENDING', 'APPROVED')
+                        """, (period_key, report, initiator, approver)).fetchone()
                 if exists:
-                    return {"status": "exists", "message": f"Запрос уже на голосовании"}
+                    status_msg = "уже подтвержден" if exists['STATUS'] == 'APPROVED' else f"ожидает аппрува от {exists['APPROVER_USER']}"
+                    return {
+                        "status": "exists", 
+                        "message": f"Срез за период {period_key} {status_msg}. Чтобы создать новый, старый должен быть аннулирован (VOIDED)."
+                    }
 
                 task_id = str(uuid.uuid4())[:8]
                 
@@ -88,7 +97,7 @@ class TableauFreezer:
                     task_id, report, period_key, initiator, 
                     approver, json.dumps(params), 
                     data.get('comment', ''), 
-                    datetime.datetime.now().isoformat()
+                    datetime.now().isoformat()
                 ))
                 conn.commit()
                 
@@ -126,7 +135,7 @@ class TableauFreezer:
 
                 conn.execute(
                     "UPDATE FREEZE_WORKFLOW SET STATUS = 'APPROVED', DATE_APPROVE = ? WHERE TASK_ID = ?", 
-                    (datetime.datetime.now().isoformat(), task_id)
+                    (datetime.now().isoformat(), task_id)
                 )
                 conn.commit()
                 
@@ -169,3 +178,37 @@ class TableauFreezer:
                 (username,)
             ).fetchall()
             return [dict(r) for r in res]
+    
+    def get_approved_tasks(self, report_filter=None, date_filter=None):
+        query = "SELECT * FROM FREEZE_WORKFLOW WHERE STATUS = 'APPROVED'"
+        params = []
+        
+        if report_filter:
+            query += " AND REPORT_NAME LIKE ?"
+            params.append(f"%{report_filter}%")
+        if date_filter:
+            # Предполагаем формат даты в БД ISO (YYYY-MM-DD...)
+            query += " AND DATE_APPROVE >= ?"
+            params.append(date_filter)
+            
+        query += " ORDER BY DATE_APPROVE DESC"
+        
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            res = conn.execute(query, params).fetchall()
+            return [dict(r) for r in res]
+
+    def void_task(self, task_id: str, admin_user: str, comment: str):
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    UPDATE FREEZE_WORKFLOW 
+                    SET STATUS = 'VOIDED', 
+                        IS_ACTUAL = 0,
+                        COMMENT = COALESCE(COMMENT, '') || ?
+                    WHERE TASK_ID = ?
+                """, (f" | [ОТЗЫВ {admin_user}: {comment}]", task_id))
+                conn.commit()
+                return {"success": True}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
