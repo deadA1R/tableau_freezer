@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Tableau Freezer Extension</title>
+    <title>Подтверждение данных в Tableau</title>
     <script src="https://cdn.jsdelivr.net/gh/tableau/extensions-api@master/lib/tableau.extensions.1.latest.js"></script>
     <style>
         body { margin: 0; padding: 10px; font-family: 'Segoe UI', sans-serif; background: #fff; overflow: hidden; }
@@ -44,8 +44,6 @@
         const userBadge = document.getElementById('user-info');
         
         const tableauUser = tableau.extensions.environment.username || "tabladmin";
-        //const tableauUser = tableau.extensions.environment.username || "local";
-        //const tableauUser = tableau.extensions.environment.username || "ID";
         userBadge.innerText = `Пользователь: ${tableauUser}`;
         
         btn.disabled = false;
@@ -78,7 +76,7 @@
             };
 
             const dialogUrl = window.location.origin + '/static/dialog.html';
-            tableau.extensions.ui.displayDialogAsync(dialogUrl, JSON.stringify(payload), { height: 650, width: 500 })
+            tableau.extensions.ui.displayDialogAsync(dialogUrl, JSON.stringify(payload), { height: 800, width: 500 })
                 .then((msg) => status.innerText = "✅ " + msg)
                 .finally(() => btn.disabled = false);
         };

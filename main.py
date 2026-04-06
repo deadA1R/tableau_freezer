@@ -10,7 +10,8 @@ import uvicorn
 
 # Локальные модули
 from app.tableau_bd_logic import TableauFreezer
-from app.report_registry import REPORTS_SQL  # <--- Cправочник SQL
+from app.config import ADMINS
+from app.report_registry import REPORTS_SQL 
 
 app = FastAPI(title="Tableau Extension Freezer Workflow")
 
@@ -43,6 +44,10 @@ class FreezeRequest(BaseModel):
     
     params: Dict[str, Any] = {}
     comment: Optional[str] = "Без комментария"
+
+class VoidRequest(BaseModel):
+    user: str
+    comment: str
 
 # Функция уведомления второго юзера
 def trigger_notification(to_user: str, msg: str):
@@ -94,6 +99,29 @@ async def approve_task(task_id: str, user: str = Query(...)):
         raise HTTPException(status_code=400, detail=result.get("message", "Ошибка подтверждения"))
         
     return {"status": "success", "message": "Данные успешно заморожены в Vertica"}
+
+@app.get("/check-admin")
+async def check_admin(user: str = Query(...)):
+    is_admin = user in ADMINS
+    return {"is_admin": is_admin}
+
+@app.get("/approved-tasks")
+async def get_approved_tasks(
+    report_name: Optional[str] = None, 
+    date_from: Optional[str] = None
+    ):
+    """Возвращает все подтвержденные задачи для админ-панели"""
+    return freezer.get_approved_tasks(report_name, date_from)
+
+@app.post("/void-task/{task_id}")
+async def api_void_task(task_id: str, data: dict):
+    freezer = TableauFreezer()
+    admin_user = data.get("user", "unknown")
+    comment = data.get("comment", "Без причины")
+    result = freezer.void_task(task_id, admin_user, comment)
+    
+    return result
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="localhost", port=8000, reload=True)

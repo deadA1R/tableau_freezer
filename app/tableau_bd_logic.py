@@ -1,9 +1,9 @@
 import os
 import uuid
-import datetime
 import json
 import vertica_python
 from dotenv import load_dotenv
+from datetime import datetime as dt
 
 from app.report_registry import REPORTS_SQL
 
@@ -39,6 +39,7 @@ class TableauFreezer:
                             STATUS VARCHAR(20) DEFAULT 'PENDING',
                             PARAMS_JSON LONG VARCHAR,
                             COMMENT VARCHAR(500),
+                            IS_ACTUAL VARCHAR(5) DEFAULT 1,
                             DATE_CREATE TIMESTAMP,
                             DATE_APPROVE TIMESTAMP
                         )
@@ -61,13 +62,17 @@ class TableauFreezer:
                 with conn.cursor() as cursor:
                     # Check if a pending request already exists for this period
                     cursor.execute(
-                        f"SELECT STATUS FROM {schema}.FREEZE_WORKFLOW WHERE PERIOD = %s AND INIT_USER = %s AND APPROVER_USER = %s AND STATUS = 'PENDING'", 
-                        (period_key,initiator, approver)
+                        f"SELECT STATUS FROM {schema}.FREEZE_WORKFLOW WHERE PERIOD = %s AND REPORT_NAME = %s AND INIT_USER = %s AND APPROVER_USER = %s AND STATUS IN ('PENDING', 'APPROVED')", 
+                        (period_key,report, initiator, approver)
                     )
                     exists = cursor.fetchone()
                 
                     if exists:
-                        return {"status": "exists", "message": "Запрос уже на голосовании"}
+                        status_msg = "уже подтвержден" if exists['STATUS'] == 'APPROVED' else f"ожидает аппрува от {exists['APPROVER_USER']}"
+                        return {
+                            "status": "exists", 
+                            "message": f"Срез за период {period_key} {status_msg}. Чтобы создать новый, старый должен быть аннулирован (VOIDED)."
+                        }
 
                     task_id = str(uuid.uuid4())[:8]
                     
@@ -82,13 +87,13 @@ class TableauFreezer:
                     cursor.execute(f"""
                         INSERT INTO {schema}.FREEZE_WORKFLOW (
                             TASK_ID, REPORT_NAME, PERIOD, INIT_USER, 
-                            APPROVER_USER, PARAMS_JSON, COMMENT, DATE_CREATE
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            APPROVER_USER, PARAMS_JSON, COMMENT, IS_ACTUAL, DATE_CREATE
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         task_id, report, period_key, initiator, 
                         approver, json.dumps(params), 
-                        data.get('comment', ''),
-                        datetime.datetime.now().isoformat()
+                        data.get('comment', ''), '1',
+                        dt.now().isoformat()
                     ))
                     # Note: conn.commit() is omitted because 'autocommit': True is set in _get_db_connection
                 
@@ -132,7 +137,7 @@ class TableauFreezer:
 
                     cursor.execute(
                         f"UPDATE {schema}.FREEZE_WORKFLOW SET STATUS = 'APPROVED', DATE_APPROVE = %s WHERE TASK_ID = %s", 
-                        (datetime.datetime.now(), task_id)
+                        (dt.now(), task_id)
                     )
             
                     return {"success": True}
@@ -145,7 +150,6 @@ class TableauFreezer:
 
     def _build_vertica_sql(self, task, base_sql):
         import json
-        from datetime import datetime as dt
 
         params = json.loads(task['PARAMS_JSON'])
         sql_template = base_sql.get("template")
@@ -185,3 +189,46 @@ class TableauFreezer:
                     if r.get('DATE_CREATE'): r['DATE_CREATE'] = str(r['DATE_CREATE'])
                     if r.get('DATE_APPROVE'): r['DATE_APPROVE'] = str(r['DATE_APPROVE'])
                 return res
+            
+    def get_approved_tasks(self, report_filter=None, date_filter=None):
+        schema = os.getenv('VERTICA_SCHEMA', 'DM')
+        query = f"SELECT * FROM {schema}.FREEZE_WORKFLOW WHERE STATUS = 'APPROVED'"
+        params = []
+        
+        if report_filter:
+            query += " AND REPORT_NAME LIKE %s"
+            params.append(f"%{report_filter}%")
+        if date_filter:
+            query += " AND DATE_APPROVE >= %s"
+            params.append(date_filter)
+            
+        query += " ORDER BY DATE_APPROVE DESC"
+        
+        with self._get_db_connection() as conn:
+            with conn.cursor('dict') as cursor:
+                cursor.execute(query, params)
+                res = cursor.fetchall()
+                
+                for r in res:
+                    if r.get('DATE_CREATE'): r['DATE_CREATE'] = str(r['DATE_CREATE'])
+                    if r.get('DATE_APPROVE'): r['DATE_APPROVE'] = str(r['DATE_APPROVE'])
+                return res
+
+    def void_task(self, task_id: str, admin_user: str, comment: str):
+        schema = os.getenv('VERTICA_SCHEMA', 'DM')
+        try:
+            with self._get_db_connection() as conn:
+                with conn.cursor('dict') as cursor:
+                    query = f"""
+                        UPDATE {schema}.FREEZE_WORKFLOW 
+                        SET STATUS = 'VOIDED', 
+                            IS_ACTUAL = 0,
+                            COMMENT = COALESCE(COMMENT, '') || %s
+                        WHERE TASK_ID = %s
+                    """
+                    append_text = f" | [ОТЗЫВ {admin_user}: {comment}]"
+                    
+                    cursor.execute(query, (append_text, task_id))
+                return {"success": True}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
