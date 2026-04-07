@@ -81,6 +81,8 @@ async def request_freeze(request: FreezeRequest):
 
         trigger_notification(res["approver"], f"Нужен аппрув для {request.dashboard}")
         return res
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -115,13 +117,11 @@ async def get_approved_tasks(
 
 @app.post("/void-task/{task_id}")
 async def api_void_task(task_id: str, data: dict):
-    # Инициализируем твой класс (или используем глобальный экземпляр)
-    freezer = TableauFreezer()
-    
+    # Используем глобальный экземпляр
     admin_user = data.get("user", "unknown")
     comment = data.get("comment", "Без причины")
     
-    # Вызываем твой метод
+    # Вызываем метод
     result = freezer.void_task(task_id, admin_user, comment)
     
     return result # вернет {"success": True/False, "message": "..."} 
