@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Query
@@ -43,7 +42,7 @@ class FreezeRequest(BaseModel):
     period_start: Optional[str] = "N/A"
     period_end: Optional[str] = "N/A"
     
-    params: Dict[str, Any] = {}
+    params: Dict[str, Any] = Field(default_factory=dict)
     comment: Optional[str] = "Без комментария"
 
 class VoidRequest(BaseModel):
@@ -117,10 +116,10 @@ async def get_approved_tasks(
     return freezer.get_approved_tasks(report_name, date_from)
 
 @app.post("/void-task/{task_id}")
-async def api_void_task(task_id: str, data: dict):
+async def api_void_task(task_id: str, data: VoidRequest):
     # Используем глобальный экземпляр
-    admin_user = data.get("user", "unknown")
-    comment = data.get("comment", "Без причины")
+    admin_user = data.user
+    comment = data.comment
     
     # Вызываем метод
     result = freezer.void_task(task_id, admin_user, comment)

@@ -3,6 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from main import app, freezer
+from app.statuses import RequestResultStatus
 
 # Подсунем тестовую SQLite-базу, чтобы не засорять боевую "workflow_freeze.db"
 TEST_DB_PATH = "test_workflow_freeze.db"
@@ -67,7 +68,7 @@ def test_request_freeze_success():
     data = response.json()
     
     assert response.status_code == 200
-    assert data["status"] == "created"
+    assert data["status"] == RequestResultStatus.CREATED.value
     assert "task_id" in data
     assert data["approver"] == "tabladmin"
     
@@ -88,7 +89,7 @@ def test_request_freeze_duplicate():
     data = response.json()
     
     assert response.status_code == 200
-    assert data["status"] == "exists"
+    assert data["status"] == RequestResultStatus.EXISTS.value
     assert "уже подтвержден" in data["message"] or "ожидает аппрува" in data["message"]
 
 def test_pending_tasks_has_task():
