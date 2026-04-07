@@ -5,6 +5,7 @@ import json
 import os
 from datetime import datetime
 from app.report_registry import REPORTS_SQL
+from app.statuses import WorkflowStatus, RequestResultStatus
 
 class TableauFreezer:
     def __init__(self):
@@ -70,12 +71,23 @@ class TableauFreezer:
                             AND REPORT_NAME = ?
                             AND INIT_USER = ? 
                             AND APPROVER_USER = ? 
-                            AND STATUS IN ('PENDING', 'APPROVED')
-                        """, (period_key, report, initiator, approver)).fetchone()
+                            AND STATUS IN (?, ?)
+                        """, (
+                            period_key,
+                            report,
+                            initiator,
+                            approver,
+                            WorkflowStatus.PENDING.value,
+                            WorkflowStatus.APPROVED.value,
+                        )).fetchone()
                 if exists:
-                    status_msg = "уже подтвержден" if exists['STATUS'] == 'APPROVED' else f"ожидает аппрува от {exists['APPROVER_USER']}"
+                    status_msg = (
+                        "уже подтвержден"
+                        if exists['STATUS'] == WorkflowStatus.APPROVED.value
+                        else f"ожидает аппрува от {exists['APPROVER_USER']}"
+                    )
                     return {
-                        "status": "exists", 
+                        "status": RequestResultStatus.EXISTS,
                         "message": f"Срез за период {period_key} {status_msg}. Чтобы создать новый, старый должен быть аннулирован (VOIDED)."
                     }
 
@@ -84,7 +96,7 @@ class TableauFreezer:
                 if initiator == approver:
                     if initiator != "tabladmin":
                         return {
-                            "success": False, 
+                                    "success": False,
                             "message": "Ошибка безопасности: Инициатор и Аппрувер не могут совпадать."
                         }
                 
@@ -101,7 +113,11 @@ class TableauFreezer:
                 ))
                 conn.commit()
                 
-                return {"status": "created", "task_id": task_id, "approver": approver}
+                return {
+                    "status": RequestResultStatus.CREATED,
+                    "task_id": task_id,
+                    "approver": approver,
+                }
         except Exception as e:
             print(f"Error: {e}")
             raise e
@@ -120,7 +136,7 @@ class TableauFreezer:
                 if task['APPROVER_USER'] != current_user:
                     return {"success": False, "message": f"Нужен аппрув от {task['APPROVER_USER']}"}
                 
-                if task['STATUS'] != 'PENDING':
+                if task['STATUS'] != WorkflowStatus.PENDING.value:
                     return {"success": False, "message": f"Статус: {task['STATUS']}"}
 
                 report_meta = REPORTS_SQL.get(db_name)
@@ -134,8 +150,8 @@ class TableauFreezer:
                 print(f"✅ Заморозка выполнена для {db_name}")
 
                 conn.execute(
-                    "UPDATE FREEZE_WORKFLOW SET STATUS = 'APPROVED', DATE_APPROVE = ? WHERE TASK_ID = ?", 
-                    (datetime.now().isoformat(), task_id)
+                    "UPDATE FREEZE_WORKFLOW SET STATUS = ?, DATE_APPROVE = ? WHERE TASK_ID = ?",
+                    (WorkflowStatus.APPROVED.value, datetime.now().isoformat(), task_id)
                 )
                 conn.commit()
                 
@@ -174,14 +190,14 @@ class TableauFreezer:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             res = conn.execute(
-                "SELECT * FROM FREEZE_WORKFLOW WHERE APPROVER_USER = ? AND STATUS = 'PENDING'", 
-                (username,)
+                "SELECT * FROM FREEZE_WORKFLOW WHERE APPROVER_USER = ? AND STATUS = ?",
+                (username, WorkflowStatus.PENDING.value)
             ).fetchall()
             return [dict(r) for r in res]
     
     def get_approved_tasks(self, report_filter=None, date_filter=None):
-        query = "SELECT * FROM FREEZE_WORKFLOW WHERE STATUS = 'APPROVED'"
-        params = []
+        query = "SELECT * FROM FREEZE_WORKFLOW WHERE STATUS = ?"
+        params = [WorkflowStatus.APPROVED.value]
         
         if report_filter:
             query += " AND REPORT_NAME LIKE ?"
@@ -203,11 +219,15 @@ class TableauFreezer:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("""
                     UPDATE FREEZE_WORKFLOW 
-                    SET STATUS = 'VOIDED', 
+                    SET STATUS = ?, 
                         IS_ACTUAL = 0,
                         COMMENT = COALESCE(COMMENT, '') || ?
                     WHERE TASK_ID = ?
-                """, (f" | [ОТЗЫВ {admin_user}: {comment}]", task_id))
+                """, (
+                    WorkflowStatus.VOIDED.value,
+                    f" | [ОТЗЫВ {admin_user}: {comment}]",
+                    task_id,
+                ))
                 conn.commit()
                 return {"success": True}
         except Exception as e:

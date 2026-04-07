@@ -12,6 +12,7 @@ import uvicorn
 from app.tableau_bd_logic import TableauFreezer
 from app.config import ADMINS
 from app.report_registry import REPORTS_SQL  # <--- Cправочник SQL
+from app.statuses import RequestResultStatus
 
 app = FastAPI(title="Tableau Extension Freezer Workflow")
 
@@ -76,7 +77,7 @@ async def request_freeze(request: FreezeRequest):
         # Передаем в БД логику
         res = freezer.create_request(request.model_dump(by_alias=True))
         
-        if res.get("status") == "exists":
+        if res.get("status") == RequestResultStatus.EXISTS:
             return res
 
         trigger_notification(res["approver"], f"Нужен аппрув для {request.dashboard}")
