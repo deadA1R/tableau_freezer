@@ -12,6 +12,7 @@ from app.tableau_bd_logic import TableauFreezer
 from app.config import ADMINS
 from app.report_registry import REPORTS_SQL  # <--- Cправочник SQL
 from app.statuses import RequestResultStatus
+from app.audit_json_logger import persist_user_context_event
 from app.user_context import (
     UserContextDebugRequest,
     build_server_context,
@@ -58,6 +59,22 @@ class VoidRequest(BaseModel):
 # Функция уведомления второго юзера
 def trigger_notification(to_user: str, msg: str):
     print(f"✈️ [NOTIF] Пользователю {to_user} отправлено: {msg}")
+
+
+def _build_user_context_payload(
+    data: UserContextDebugRequest,
+    request: Request,
+    default_event_type: str,
+) -> Dict[str, Any]:
+    return {
+        "session_id": get_or_create_session_id(data.session_id),
+        "event_id": get_or_create_event_id(data.event_id),
+        "event_type": data.event_type or default_event_type,
+        "server_context": build_server_context(request),
+        "user": data.user,
+        "dashboard": data.dashboard,
+        "client_context": data.client_context,
+    }
 
 # --- ЭНДПОИНТЫ ---
 
@@ -147,15 +164,20 @@ async def debug_user_context(request: Request):
 
 @app.post("/debug/user-context")
 async def debug_user_context_with_client_data(data: UserContextDebugRequest, request: Request):
+    return _build_user_context_payload(data, request, default_event_type="debug_probe")
+
+
+@app.post("/audit/user-context")
+async def audit_user_context(data: UserContextDebugRequest, request: Request):
+    payload = _build_user_context_payload(data, request, default_event_type="audit_probe")
+
+    write_result = persist_user_context_event(payload)
+
     return {
-        "session_id": get_or_create_session_id(data.session_id),
-        "event_id": get_or_create_event_id(data.event_id),
-        "event_type": data.event_type or "debug_probe",
-        "server_context": build_server_context(request),
-        "user": data.user,
-        "dashboard": data.dashboard,
-        "client_context": data.client_context,
+        **payload,
+        "audit": write_result,
     }
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="localhost", port=8000, reload=True)

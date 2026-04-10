@@ -1,4 +1,5 @@
 import os
+import json
 import pytest
 from fastapi.testclient import TestClient
 
@@ -197,3 +198,48 @@ def test_debug_user_context_collects_server_and_client_data():
     assert server_context["network_ip"] == "203.0.113.0"
     assert server_context["client_hints"]["sec_ch_ua_platform"] == "\"Linux\""
     assert server_context["confidence"]["ip_confidence"] == "medium"
+
+
+def test_audit_user_context_persists_jsonl(tmp_path, monkeypatch):
+    audit_file = tmp_path / "user_context_events.jsonl"
+    monkeypatch.setenv("USER_CONTEXT_AUDIT_ENABLED", "1")
+    monkeypatch.setenv("USER_CONTEXT_AUDIT_PATH", str(audit_file))
+
+    response = client.post(
+        "/audit/user-context",
+        headers={
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/146.0.0.0 Safari/537.36",
+            "x-real-ip": "198.51.100.42",
+        },
+        json={
+            "user": "prod_like_user",
+            "dashboard": "prod_dashboard",
+            "session_id": "sess-prod-1",
+            "event_id": "evt-prod-1",
+            "event_type": "session_start",
+            "client_context": {
+                "timezone": "Asia/Almaty",
+                "public_ip_candidate": "77.240.44.25",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["audit"]["enabled"] is True
+    assert body["audit"]["saved"] is True
+    assert body["audit"]["path"] == str(audit_file)
+
+    assert audit_file.exists()
+    lines = audit_file.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+
+    saved_record = json.loads(lines[0])
+    assert saved_record["user"] == "prod_like_user"
+    assert saved_record["dashboard"] == "prod_dashboard"
+    assert saved_record["session_id"] == "sess-prod-1"
+    assert saved_record["event_id"] == "evt-prod-1"
+    assert saved_record["event_type"] == "session_start"
+    assert saved_record["server_context"]["client_ip"] == "198.51.100.42"
+    assert saved_record["client_context"]["public_ip_candidate"] == "77.240.44.25"
+    assert "ingest_timestamp_utc" in saved_record
