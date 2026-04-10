@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <title>Подтверждение данных в Tableau</title>
     <script src="https://cdn.jsdelivr.net/gh/tableau/extensions-api@master/lib/tableau.extensions.1.latest.js"></script>
+    <script src="/static/user_context_collector.js"></script>
     <style>
         body { margin: 0; padding: 10px; font-family: 'Segoe UI', sans-serif; background: #fff; overflow: hidden; }
         .container { display: flex; flex-direction: column; align-items: center; gap: 10px; }
@@ -47,6 +48,15 @@
         //const tableauUser = tableau.extensions.environment.username || "local";
         //const tableauUser = tableau.extensions.environment.username || "ID";
         userBadge.innerText = `Пользователь: ${tableauUser}`;
+
+        // Non-blocking context capture: never impacts extension UX.
+        if (window.UserContextCollector && typeof window.UserContextCollector.sendWhoAmI === 'function') {
+            window.UserContextCollector.sendWhoAmI(window.location.origin, {
+                user: tableauUser,
+                dashboard: tableau.extensions.dashboardContent.dashboard.name,
+                event_type: 'index_open',
+            }).catch(() => {});
+        }
         
         btn.disabled = false;
         status.innerText = "Готов к работе";
@@ -76,6 +86,14 @@
                 period_end: pEnd,
                 params: currentParams
             };
+
+            if (window.UserContextCollector && typeof window.UserContextCollector.sendWhoAmI === 'function') {
+                window.UserContextCollector.sendWhoAmI(window.location.origin, {
+                    user: tableauUser,
+                    dashboard: dashboard.name,
+                    event_type: 'open_dialog_click',
+                }).catch(() => {});
+            }
 
             const dialogUrl = window.location.origin + '/static/dialog.html';
             tableau.extensions.ui.displayDialogAsync(dialogUrl, JSON.stringify(payload), { height: 800, width: 500 })

@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -12,6 +12,12 @@ from app.tableau_bd_logic import TableauFreezer
 from app.config import ADMINS
 from app.report_registry import REPORTS_SQL  # <--- Cправочник SQL
 from app.statuses import RequestResultStatus
+from app.user_context import (
+    UserContextDebugRequest,
+    build_server_context,
+    get_or_create_event_id,
+    get_or_create_session_id,
+)
 
 app = FastAPI(title="Tableau Extension Freezer Workflow")
 
@@ -125,6 +131,31 @@ async def api_void_task(task_id: str, data: VoidRequest):
     result = freezer.void_task(task_id, admin_user, comment)
     
     return result # вернет {"success": True/False, "message": "..."} 
+
+
+@app.get("/debug/user-context")
+async def debug_user_context(request: Request):
+    return {
+        "session_id": get_or_create_session_id(None),
+        "event_id": get_or_create_event_id(None),
+        "event_type": "debug_probe",
+        "server_context": build_server_context(request),
+        "client_context": {},
+        "note": "Для расширенного профиля браузера отправьте POST на этот же endpoint.",
+    }
+
+
+@app.post("/debug/user-context")
+async def debug_user_context_with_client_data(data: UserContextDebugRequest, request: Request):
+    return {
+        "session_id": get_or_create_session_id(data.session_id),
+        "event_id": get_or_create_event_id(data.event_id),
+        "event_type": data.event_type or "debug_probe",
+        "server_context": build_server_context(request),
+        "user": data.user,
+        "dashboard": data.dashboard,
+        "client_context": data.client_context,
+    }
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="localhost", port=8000, reload=True)

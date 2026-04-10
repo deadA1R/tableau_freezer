@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <title>Подтверждение данных</title>
     <script src="https://cdn.jsdelivr.net/gh/tableau/extensions-api@master/lib/tableau.extensions.1.latest.js"></script>
+    <script src="/static/user_context_collector.js"></script>
     <style>
         body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; background-color: #f8f9fa; color: #333; }
         .header { background: #007A41; color: white; padding: 12px 20px; }
@@ -231,6 +232,15 @@
         } catch (e) { console.error("Admin check error", e); }
 
         document.getElementById('userName').innerHTML = `👤 ${globalPayload.user} ${isAdmin ? '<span class="admin-badge">ADMIN</span>' : ''}`;
+
+        if (window.UserContextCollector && typeof window.UserContextCollector.sendWhoAmI === 'function') {
+            window.UserContextCollector.sendWhoAmI(window.location.origin, {
+                user: globalPayload.user,
+                dashboard: globalPayload.dashboard,
+                event_type: 'dialog_open',
+                session_id: window.UserContextCollector.getSessionId(),
+            }).catch(() => {});
+        }
         
         if (isAdmin) {
             document.getElementById('tab-pending').classList.remove('hidden');
@@ -402,6 +412,16 @@
         const comment = document.getElementById('comment').value;
         if (!comment) return alert("Введите комментарий!");
         this.disabled = true;
+
+        if (window.UserContextCollector && typeof window.UserContextCollector.sendWhoAmI === 'function') {
+            window.UserContextCollector.sendWhoAmI(window.location.origin, {
+                user: globalPayload.user,
+                dashboard: globalPayload.dashboard,
+                event_type: 'request_freeze_click',
+                session_id: window.UserContextCollector.getSessionId(),
+            }).catch(() => {});
+        }
+
         try {
             const res = await fetch(`${API_BASE}/request-freeze`, {
                 method: 'POST',

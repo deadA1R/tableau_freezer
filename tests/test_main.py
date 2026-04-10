@@ -152,3 +152,48 @@ def test_approved_tasks_no_longer_has_task_or_is_voided():
     # Так как мы ищем строго STATUS = 'APPROVED' в get_approved_tasks(),
     # аннулированная (VOIDED) задача здесь больше не должна выводиться.
     assert not any(t["TASK_ID"] == state.task_id for t in tasks)
+
+
+def test_debug_user_context_collects_server_and_client_data():
+    response = client.post(
+        "/debug/user-context",
+        headers={
+            "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36",
+            "x-forwarded-for": "203.0.113.10, 10.0.0.1",
+            "accept-language": "ru-RU,ru;q=0.9",
+            "sec-ch-ua-platform": "\"Linux\"",
+        },
+        json={
+            "user": "debug_user",
+            "dashboard": "debug_dashboard",
+            "session_id": "session-1",
+            "event_id": "event-1",
+            "event_type": "manual_debug_probe",
+            "client_context": {
+                "platform": "Linux x86_64",
+                "timezone": "Asia/Almaty",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["user"] == "debug_user"
+    assert data["dashboard"] == "debug_dashboard"
+    assert data["session_id"] == "session-1"
+    assert data["event_id"] == "event-1"
+    assert data["event_type"] == "manual_debug_probe"
+    assert data["client_context"]["platform"] == "Linux x86_64"
+    assert data["client_context"]["timezone"] == "Asia/Almaty"
+
+    server_context = data["server_context"]
+    assert server_context["client_ip"] == "203.0.113.10"
+    assert server_context["client_ip_source"] == "x-forwarded-for:first"
+    assert server_context["browser_name"] == "Chrome"
+    assert server_context["browser_major"] == "125"
+    assert server_context["os_name"] == "Linux"
+    assert server_context["ip_details"]["network_guess"]["network_cidr"] == "203.0.113.0/24"
+    assert server_context["network_ip"] == "203.0.113.0"
+    assert server_context["client_hints"]["sec_ch_ua_platform"] == "\"Linux\""
+    assert server_context["confidence"]["ip_confidence"] == "medium"
