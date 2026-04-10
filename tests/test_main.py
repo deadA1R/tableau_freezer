@@ -1,5 +1,6 @@
 import os
 import json
+import sqlite3
 import pytest
 from fastapi.testclient import TestClient
 
@@ -63,7 +64,11 @@ def test_request_freeze_success():
             "Дата начала периода": "01.01.2025",
             "Дата окончания периода": "31.01.2025"
         },
-        "comment": "Pytest Auto-test"
+        "comment": "Pytest Auto-test",
+        "session_id": "sess-req-1",
+        "event_id": "evt-req-1",
+        "event_type": "freeze_request",
+        "public_ip_candidate": "77.240.44.25",
     }
     response = client.post("/request-freeze", json=payload)
     data = response.json()
@@ -74,6 +79,85 @@ def test_request_freeze_success():
     assert data["approver"] == "tabladmin"
     
     state.task_id = data["task_id"]
+
+
+def test_request_freeze_context_fields_persisted_in_db():
+    assert state.task_id is not None, "task_id не инициализирован"
+
+    with sqlite3.connect(TEST_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT SESSION_ID, EVENT_ID, EVENT_TYPE, PUBLIC_IP_CANDIDATE
+            FROM FREEZE_WORKFLOW
+            WHERE TASK_ID = ?
+            """,
+            (state.task_id,),
+        ).fetchone()
+
+    assert row is not None
+    assert row["SESSION_ID"] == "sess-req-1"
+    assert row["EVENT_ID"] == "evt-req-1"
+    assert row["EVENT_TYPE"] == "freeze_request"
+    assert row["PUBLIC_IP_CANDIDATE"] == "77.240.44.25"
+
+
+def test_audit_user_context_backfills_workflow_context_by_task_id():
+    create_response = client.post(
+        "/request-freeze",
+        json={
+            "dashboard": "Слайд 1. Отчет по операциям репо (1.1)",
+            "user": "backfill_user",
+            "approver": "tabladmin",
+            "params": {
+                "Дата начала периода": "01.02.2025",
+                "Дата окончания периода": "28.02.2025",
+            },
+            "comment": "Backfill check",
+        },
+    )
+    assert create_response.status_code == 200
+    task_id = create_response.json()["task_id"]
+
+    audit_response = client.post(
+        "/audit/user-context",
+        headers={
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/146.0.0.0 Safari/537.36",
+            "x-real-ip": "198.51.100.42",
+        },
+        json={
+            "user": "backfill_user",
+            "dashboard": "Слайд 1. Отчет по операциям репо (1.1)",
+            "session_id": "sess-backfill-1",
+            "event_id": "evt-backfill-1",
+            "freeze_task_id": task_id,
+            "event_type": "freeze_init_submit",
+            "client_context": {
+                "public_ip_candidate": "95.47.12.33",
+            },
+        },
+    )
+
+    assert audit_response.status_code == 200
+    audit_body = audit_response.json()
+    assert audit_body["workflow_context_sync"]["matched_task"] is True
+
+    with sqlite3.connect(TEST_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT SESSION_ID, EVENT_ID, EVENT_TYPE, PUBLIC_IP_CANDIDATE
+            FROM FREEZE_WORKFLOW
+            WHERE TASK_ID = ?
+            """,
+            (task_id,),
+        ).fetchone()
+
+    assert row is not None
+    assert row["SESSION_ID"] == "sess-backfill-1"
+    assert row["EVENT_ID"] == "evt-backfill-1"
+    assert row["EVENT_TYPE"] == "freeze_init_submit"
+    assert row["PUBLIC_IP_CANDIDATE"] == "95.47.12.33"
 
 def test_request_freeze_duplicate():
     # Попытка создать дубликат, если старый еще PENDING/APPROVED
@@ -216,6 +300,7 @@ def test_audit_user_context_persists_jsonl(tmp_path, monkeypatch):
             "dashboard": "prod_dashboard",
             "session_id": "sess-prod-1",
             "event_id": "evt-prod-1",
+            "freeze_task_id": "frz-12345",
             "event_type": "session_start",
             "client_context": {
                 "timezone": "Asia/Almaty",
@@ -239,7 +324,75 @@ def test_audit_user_context_persists_jsonl(tmp_path, monkeypatch):
     assert saved_record["dashboard"] == "prod_dashboard"
     assert saved_record["session_id"] == "sess-prod-1"
     assert saved_record["event_id"] == "evt-prod-1"
+    assert saved_record["freeze_task_id"] == "frz-12345"
     assert saved_record["event_type"] == "session_start"
     assert saved_record["server_context"]["client_ip"] == "198.51.100.42"
     assert saved_record["client_context"]["public_ip_candidate"] == "77.240.44.25"
     assert "ingest_timestamp_utc" in saved_record
+
+
+def test_audit_user_context_persists_extended_table_row():
+    response = client.post(
+        "/audit/user-context",
+        headers={
+            "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36",
+            "accept-language": "ru-RU,ru;q=0.9",
+            "sec-ch-ua": '"Chromium";v="125", "Google Chrome";v="125"',
+            "sec-ch-ua-platform": '"Linux"',
+            "x-real-ip": "203.0.113.10",
+        },
+        json={
+            "user": "tableau_user_1",
+            "dashboard": "audit_dashboard",
+            "session_id": "sess-ext-1",
+            "event_id": "evt-ext-1",
+            "freeze_task_id": "task-ext-1",
+            "event_type": "freeze_init_submit",
+            "client_context": {
+                "public_ip_candidate": "77.240.44.25",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["extended_audit"]["saved"] is True
+
+    with sqlite3.connect(TEST_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT
+                FREEZE_TASK_ID,
+                SESSION_ID,
+                EVENT_ID,
+                EVENT_TYPE,
+                TIMESTAMP_UTC,
+                USER_AGENT,
+                ACCEPT_LANGUAGE,
+                SEC_CH_UA,
+                SEC_CH_UA_PLATFORM,
+                DEVICE_TYPE,
+                TABLEAU_USER,
+                DASHBOARD,
+                PUBLIC_IP_CANDIDATE
+            FROM freeze_workflow_extended
+            WHERE EVENT_ID = ?
+            """,
+            ("evt-ext-1",),
+        ).fetchone()
+
+    assert row is not None
+    assert row["FREEZE_TASK_ID"] == "task-ext-1"
+    assert row["SESSION_ID"] == "sess-ext-1"
+    assert row["EVENT_ID"] == "evt-ext-1"
+    assert row["EVENT_TYPE"] == "freeze_init_submit"
+    assert row["TIMESTAMP_UTC"] is not None
+    assert "Chrome/125.0.0.0" in row["USER_AGENT"]
+    assert row["ACCEPT_LANGUAGE"] == "ru-RU,ru;q=0.9"
+    assert row["SEC_CH_UA"] == '"Chromium";v="125", "Google Chrome";v="125"'
+    assert row["SEC_CH_UA_PLATFORM"] == '"Linux"'
+    assert row["DEVICE_TYPE"] == "desktop"
+    assert row["TABLEAU_USER"] == "tableau_user_1"
+    assert row["DASHBOARD"] == "audit_dashboard"
+    assert row["PUBLIC_IP_CANDIDATE"] == "77.240.44.25"

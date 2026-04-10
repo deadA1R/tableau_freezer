@@ -13,6 +13,7 @@ class UserContextDebugRequest(BaseModel):
     dashboard: Optional[str] = None
     session_id: Optional[str] = None
     event_id: Optional[str] = None
+    freeze_task_id: Optional[str] = None
     event_type: Optional[str] = "debug_probe"
     client_context: Dict[str, Any] = Field(default_factory=dict)
 

@@ -8,6 +8,44 @@ from typing import Any
 from app.report_registry import REPORTS_SQL
 from app.statuses import WorkflowStatus, RequestResultStatus
 
+
+WORKFLOW_CONTEXT_COLUMNS: dict[str, str] = {
+    "SESSION_ID": "TEXT",
+    "EVENT_ID": "TEXT",
+    "EVENT_TYPE": "TEXT",
+    "PUBLIC_IP_CANDIDATE": "TEXT",
+}
+
+WORKFLOW_EXTENDED_COLUMNS: dict[str, str] = {
+    "FREEZE_TASK_ID": "TEXT",
+    "SESSION_ID": "TEXT",
+    "EVENT_ID": "TEXT",
+    "EVENT_TYPE": "TEXT",
+    "TIMESTAMP_UTC": "TEXT",
+    "USER_AGENT": "TEXT",
+    "ACCEPT_LANGUAGE": "TEXT",
+    "SEC_CH_UA": "TEXT",
+    "SEC_CH_UA_PLATFORM": "TEXT",
+    "DEVICE_TYPE": "TEXT",
+    "TABLEAU_USER": "TEXT",
+    "DASHBOARD": "TEXT",
+    "PUBLIC_IP_CANDIDATE": "TEXT",
+}
+
+
+def _extract_public_ip_candidate(data: dict[str, Any]) -> str | None:
+    top_level_value = data.get("public_ip_candidate")
+    if isinstance(top_level_value, str) and top_level_value.strip():
+        return top_level_value.strip()
+
+    client_context = data.get("client_context")
+    if isinstance(client_context, dict):
+        client_value = client_context.get("public_ip_candidate")
+        if isinstance(client_value, str) and client_value.strip():
+            return client_value.strip()
+
+    return None
+
 class TableauFreezer:
     def __init__(self):
         self.db_path = "workflow_freeze.db"
@@ -26,11 +64,61 @@ class TableauFreezer:
                     PARAMS_JSON TEXT,      -- Параметры фильтрации
                     COMMENT TEXT,
                     IS_ACTUAL INTEGER DEFAULT 1,
+                    SESSION_ID TEXT,
+                    EVENT_ID TEXT,
+                    EVENT_TYPE TEXT,
+                    PUBLIC_IP_CANDIDATE TEXT,
                     DATE_CREATE TEXT,
                     DATE_APPROVE TEXT       -- Время финального аппрува
                 )
             """)
+            self._ensure_workflow_context_columns(conn)
+            self._ensure_workflow_extended_table(conn)
             conn.commit()
+
+    def _ensure_workflow_context_columns(self, conn: sqlite3.Connection) -> None:
+        existing_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(FREEZE_WORKFLOW)").fetchall()
+        }
+
+        for column_name, column_type in WORKFLOW_CONTEXT_COLUMNS.items():
+            if column_name not in existing_columns:
+                conn.execute(
+                    f"ALTER TABLE FREEZE_WORKFLOW ADD COLUMN {column_name} {column_type}"
+                )
+
+    def _ensure_workflow_extended_table(self, conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS freeze_workflow_extended (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                FREEZE_TASK_ID TEXT,
+                SESSION_ID TEXT,
+                EVENT_ID TEXT,
+                EVENT_TYPE TEXT,
+                TIMESTAMP_UTC TEXT,
+                USER_AGENT TEXT,
+                ACCEPT_LANGUAGE TEXT,
+                SEC_CH_UA TEXT,
+                SEC_CH_UA_PLATFORM TEXT,
+                DEVICE_TYPE TEXT,
+                TABLEAU_USER TEXT,
+                DASHBOARD TEXT,
+                PUBLIC_IP_CANDIDATE TEXT
+            )
+            """
+        )
+
+        existing_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(freeze_workflow_extended)").fetchall()
+        }
+        for column_name, column_type in WORKFLOW_EXTENDED_COLUMNS.items():
+            if column_name not in existing_columns:
+                conn.execute(
+                    f"ALTER TABLE freeze_workflow_extended ADD COLUMN {column_name} {column_type}"
+                )
 
     def _init_db_2(self):
         warnings.warn(
@@ -61,6 +149,10 @@ class TableauFreezer:
         try:
             report = data.get('dashboard', 'Unknown')
             params = data.get('params', {})
+            session_id = data.get("session_id")
+            event_id = data.get("event_id")
+            event_type = data.get("event_type")
+            public_ip_candidate = _extract_public_ip_candidate(data)
             
             d_s = params.get('DateStart') or params.get('Дата начала периода') or "all"
             d_e = params.get('DateEnd') or params.get('Дата окончания периода') or "all"
@@ -109,12 +201,18 @@ class TableauFreezer:
                 conn.execute("""
                     INSERT INTO FREEZE_WORKFLOW (
                         TASK_ID, REPORT_NAME, PERIOD, INIT_USER, 
-                        APPROVER_USER, PARAMS_JSON, COMMENT, DATE_CREATE
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        APPROVER_USER, PARAMS_JSON, COMMENT,
+                        SESSION_ID, EVENT_ID, EVENT_TYPE, PUBLIC_IP_CANDIDATE,
+                        DATE_CREATE
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     task_id, report, period_key, initiator, 
                     approver, json.dumps(params), 
                     data.get('comment', ''), 
+                    session_id,
+                    event_id,
+                    event_type,
+                    public_ip_candidate,
                     datetime.now().isoformat()
                 ))
                 conn.commit()
@@ -127,6 +225,103 @@ class TableauFreezer:
         except Exception as e:
             print(f"Error: {e}")
             raise e
+
+    def backfill_request_context(self, task_id: str, context: dict[str, Any]) -> dict[str, Any]:
+        session_id = context.get("session_id")
+        event_id = context.get("event_id")
+        event_type = context.get("event_type")
+        public_ip_candidate = _extract_public_ip_candidate(context)
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            existing = conn.execute(
+                "SELECT TASK_ID, SESSION_ID, EVENT_ID, EVENT_TYPE, PUBLIC_IP_CANDIDATE FROM FREEZE_WORKFLOW WHERE TASK_ID = ?",
+                (task_id,),
+            ).fetchone()
+
+            if not existing:
+                return {
+                    "matched_task": False,
+                    "updated": False,
+                    "message": "Задача для backfill не найдена",
+                }
+
+            if (
+                existing["SESSION_ID"]
+                and session_id
+                and existing["SESSION_ID"] != session_id
+            ):
+                return {
+                    "matched_task": True,
+                    "updated": False,
+                    "message": "Session mismatch: запись уже привязана к другому session_id",
+                }
+
+            conn.execute(
+                """
+                UPDATE FREEZE_WORKFLOW
+                SET SESSION_ID = COALESCE(SESSION_ID, ?),
+                    EVENT_ID = COALESCE(EVENT_ID, ?),
+                    EVENT_TYPE = COALESCE(EVENT_TYPE, ?),
+                    PUBLIC_IP_CANDIDATE = COALESCE(PUBLIC_IP_CANDIDATE, ?)
+                WHERE TASK_ID = ?
+                """,
+                (session_id, event_id, event_type, public_ip_candidate, task_id),
+            )
+            conn.commit()
+
+            return {
+                "matched_task": True,
+                "updated": conn.total_changes > 0,
+                "message": "Контекст сопоставлен по task_id",
+            }
+
+    def insert_workflow_extended_event(self, event_payload: dict[str, Any]) -> dict[str, Any]:
+        server_context = event_payload.get("server_context") or {}
+        client_hints = server_context.get("client_hints") or {}
+
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO freeze_workflow_extended (
+                    FREEZE_TASK_ID,
+                    SESSION_ID,
+                    EVENT_ID,
+                    EVENT_TYPE,
+                    TIMESTAMP_UTC,
+                    USER_AGENT,
+                    ACCEPT_LANGUAGE,
+                    SEC_CH_UA,
+                    SEC_CH_UA_PLATFORM,
+                    DEVICE_TYPE,
+                    TABLEAU_USER,
+                    DASHBOARD,
+                    PUBLIC_IP_CANDIDATE
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_payload.get("freeze_task_id"),
+                    event_payload.get("session_id"),
+                    event_payload.get("event_id"),
+                    event_payload.get("event_type"),
+                    server_context.get("timestamp_utc"),
+                    server_context.get("user_agent"),
+                    server_context.get("accept_language"),
+                    client_hints.get("sec_ch_ua"),
+                    client_hints.get("sec_ch_ua_platform"),
+                    server_context.get("device_type"),
+                    event_payload.get("user"),
+                    event_payload.get("dashboard"),
+                    _extract_public_ip_candidate(event_payload),
+                ),
+            )
+            conn.commit()
+
+            return {
+                "saved": True,
+                "row_id": cursor.lastrowid,
+                "table": "freeze_workflow_extended",
+            }
 
     def final_approve(self, task_id: str, current_user: str) -> dict[str, Any]:
         try:

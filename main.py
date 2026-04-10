@@ -51,6 +51,11 @@ class FreezeRequest(BaseModel):
     
     params: Dict[str, Any] = Field(default_factory=dict)
     comment: Optional[str] = "Без комментария"
+    session_id: Optional[str] = None
+    event_id: Optional[str] = None
+    event_type: Optional[str] = None
+    public_ip_candidate: Optional[str] = None
+    client_context: Dict[str, Any] = Field(default_factory=dict)
 
 class VoidRequest(BaseModel):
     user: str
@@ -69,6 +74,7 @@ def _build_user_context_payload(
     return {
         "session_id": get_or_create_session_id(data.session_id),
         "event_id": get_or_create_event_id(data.event_id),
+        "freeze_task_id": data.freeze_task_id,
         "event_type": data.event_type or default_event_type,
         "server_context": build_server_context(request),
         "user": data.user,
@@ -90,19 +96,24 @@ async def get_pending_tasks(user: str = Query(...)):
     return freezer.get_user_tasks(user)
 
 @app.post("/request-freeze")
-async def request_freeze(request: FreezeRequest):
+async def request_freeze(request_data: FreezeRequest, request: Request):
     try:
         # Проверяем, есть ли такой отчет в справочнике
-        if request.dashboard not in REPORTS_SQL:
-             raise HTTPException(status_code=400, detail=f"Отчет '{request.dashboard}' не описан в реестре")
+        if request_data.dashboard not in REPORTS_SQL:
+             raise HTTPException(status_code=400, detail=f"Отчет '{request_data.dashboard}' не описан в реестре")
+
+        payload = request_data.model_dump(by_alias=True)
+        payload["session_id"] = request_data.session_id
+        payload["event_id"] = request_data.event_id
+        payload["event_type"] = request_data.event_type
 
         # Передаем в БД логику
-        res = freezer.create_request(request.model_dump(by_alias=True))
+        res = freezer.create_request(payload)
         
         if res.get("status") == RequestResultStatus.EXISTS:
             return res
 
-        trigger_notification(res["approver"], f"Нужен аппрув для {request.dashboard}")
+        trigger_notification(res["approver"], f"Нужен аппрув для {request_data.dashboard}")
         return res
     except HTTPException:
         raise
@@ -172,10 +183,19 @@ async def audit_user_context(data: UserContextDebugRequest, request: Request):
     payload = _build_user_context_payload(data, request, default_event_type="audit_probe")
 
     write_result = persist_user_context_event(payload)
+    extended_write_result = freezer.insert_workflow_extended_event(payload)
+    workflow_context_sync = None
+    if payload.get("freeze_task_id"):
+        workflow_context_sync = freezer.backfill_request_context(
+            payload["freeze_task_id"],
+            payload,
+        )
 
     return {
         **payload,
         "audit": write_result,
+        "extended_audit": extended_write_result,
+        "workflow_context_sync": workflow_context_sync,
     }
 
 

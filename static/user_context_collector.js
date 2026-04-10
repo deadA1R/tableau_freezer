@@ -1,5 +1,6 @@
 (function () {
     const SESSION_STORAGE_KEY = 'tableau_freezer_audit_session_id';
+    let cachedPublicIpCandidate = null;
 
     function safe(callable, fallback) {
         try {
@@ -94,6 +95,10 @@
     }
 
     async function getPublicIpCandidate() {
+        if (cachedPublicIpCandidate) {
+            return cachedPublicIpCandidate;
+        }
+
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 1500);
         try {
@@ -105,12 +110,22 @@
                 return null;
             }
             const data = await response.json();
-            return data.ip || null;
+            cachedPublicIpCandidate = data.ip || null;
+            return cachedPublicIpCandidate;
         } catch (_err) {
             return null;
         } finally {
             clearTimeout(timeoutId);
         }
+    }
+
+    async function collectFreezeContext() {
+        return {
+            session_id: getSessionId(),
+            event_id: newEventId(),
+            event_type: 'freeze_request',
+            public_ip_candidate: await getPublicIpCandidate(),
+        };
     }
 
     async function buildClientContext() {
@@ -130,6 +145,7 @@
             dashboard: payload && payload.dashboard ? payload.dashboard : null,
             session_id: payload && payload.session_id ? payload.session_id : getSessionId(),
             event_id: payload && payload.event_id ? payload.event_id : newEventId(),
+            freeze_task_id: payload && payload.freeze_task_id ? payload.freeze_task_id : null,
             event_type: eventType,
             client_context: await buildClientContext(),
         };
@@ -143,6 +159,8 @@
 
     window.UserContextCollector = {
         getSessionId: getSessionId,
+        getEventId: newEventId,
+        collectFreezeContext: collectFreezeContext,
         sendWhoAmI: sendWhoAmI,
     };
 })();
