@@ -1,7 +1,6 @@
-import os
 from pathlib import Path
 from typing import Dict, Any, Optional
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -12,6 +11,14 @@ import uvicorn
 from app.tableau_bd_logic import TableauFreezer
 from app.config import ADMINS
 from app.report_registry import REPORTS_SQL  # <--- Cправочник SQL
+from app.statuses import RequestResultStatus
+from app.audit_json_logger import persist_user_context_event
+from app.user_context import (
+    UserContextDebugRequest,
+    build_server_context,
+    get_or_create_event_id,
+    get_or_create_session_id,
+)
 
 app = FastAPI(title="Tableau Extension Freezer Workflow")
 
@@ -42,7 +49,7 @@ class FreezeRequest(BaseModel):
     period_start: Optional[str] = "N/A"
     period_end: Optional[str] = "N/A"
     
-    params: Dict[str, Any] = {}
+    params: Dict[str, Any] = Field(default_factory=dict)
     comment: Optional[str] = "Без комментария"
 
 class VoidRequest(BaseModel):
@@ -52,6 +59,22 @@ class VoidRequest(BaseModel):
 # Функция уведомления второго юзера
 def trigger_notification(to_user: str, msg: str):
     print(f"✈️ [NOTIF] Пользователю {to_user} отправлено: {msg}")
+
+
+def _build_user_context_payload(
+    data: UserContextDebugRequest,
+    request: Request,
+    default_event_type: str,
+) -> Dict[str, Any]:
+    return {
+        "session_id": get_or_create_session_id(data.session_id),
+        "event_id": get_or_create_event_id(data.event_id),
+        "event_type": data.event_type or default_event_type,
+        "server_context": build_server_context(request),
+        "user": data.user,
+        "dashboard": data.dashboard,
+        "client_context": data.client_context,
+    }
 
 # --- ЭНДПОИНТЫ ---
 
@@ -76,11 +99,13 @@ async def request_freeze(request: FreezeRequest):
         # Передаем в БД логику
         res = freezer.create_request(request.model_dump(by_alias=True))
         
-        if res.get("status") == "exists":
+        if res.get("status") == RequestResultStatus.EXISTS:
             return res
 
         trigger_notification(res["approver"], f"Нужен аппрув для {request.dashboard}")
         return res
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -114,17 +139,45 @@ async def get_approved_tasks(
     return freezer.get_approved_tasks(report_name, date_from)
 
 @app.post("/void-task/{task_id}")
-async def api_void_task(task_id: str, data: dict):
-    # Инициализируем твой класс (или используем глобальный экземпляр)
-    freezer = TableauFreezer()
+async def api_void_task(task_id: str, data: VoidRequest):
+    # Используем глобальный экземпляр
+    admin_user = data.user
+    comment = data.comment
     
-    admin_user = data.get("user", "unknown")
-    comment = data.get("comment", "Без причины")
-    
-    # Вызываем твой метод
+    # Вызываем метод
     result = freezer.void_task(task_id, admin_user, comment)
     
     return result # вернет {"success": True/False, "message": "..."} 
+
+
+@app.get("/debug/user-context")
+async def debug_user_context(request: Request):
+    return {
+        "session_id": get_or_create_session_id(None),
+        "event_id": get_or_create_event_id(None),
+        "event_type": "debug_probe",
+        "server_context": build_server_context(request),
+        "client_context": {},
+        "note": "Для расширенного профиля браузера отправьте POST на этот же endpoint.",
+    }
+
+
+@app.post("/debug/user-context")
+async def debug_user_context_with_client_data(data: UserContextDebugRequest, request: Request):
+    return _build_user_context_payload(data, request, default_event_type="debug_probe")
+
+
+@app.post("/audit/user-context")
+async def audit_user_context(data: UserContextDebugRequest, request: Request):
+    payload = _build_user_context_payload(data, request, default_event_type="audit_probe")
+
+    write_result = persist_user_context_event(payload)
+
+    return {
+        **payload,
+        "audit": write_result,
+    }
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="localhost", port=8000, reload=True)
