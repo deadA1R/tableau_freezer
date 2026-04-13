@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <title>Подтверждение данных</title>
     <script src="https://cdn.jsdelivr.net/gh/tableau/extensions-api@master/lib/tableau.extensions.1.latest.js"></script>
+    <script src="/static/user_context_collector.js"></script>
     <style>
         body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; background-color: #f8f9fa; color: #333; }
         .header { background: #007A41; color: white; padding: 12px 20px; }
@@ -123,6 +124,7 @@
     </div>
 
     <div class="content">
+
         <div id="tab-content-create" class="tab-content active">
             <div class="section-title">Параметры нового среза</div>
             <div class="card">
@@ -169,6 +171,7 @@
             </div>
             <div id="archive-container"></div>
         </div>
+
         <div id="loader" style="text-align: center; padding: 20px; color: #999;">⏳ Загрузка...</div>
     </div>
 
@@ -229,7 +232,7 @@
         } catch (e) { console.error("Admin check error", e); }
 
         document.getElementById('userName').innerHTML = `👤 ${globalPayload.user} ${isAdmin ? '<span class="admin-badge">ADMIN</span>' : ''}`;
-        
+ 
         if (isAdmin) {
             document.getElementById('tab-pending').classList.remove('hidden');
             document.getElementById('tab-archive').classList.remove('hidden');
@@ -348,7 +351,13 @@
                 </div>
                 ${!isArchive ? `
                     <div class="confirm-wrapper">
-                        <input type="checkbox" class="task-checkbox" data-id="${t.TASK_ID}" onchange="updateBtn()">
+                        <input 
+                            type="checkbox" 
+                            class="task-checkbox" 
+                            data-id="${t.TASK_ID}"
+                            data-report-name="${t.REPORT_NAME}" 
+                            onchange="updateBtn()"
+                        >
                         <label style="font-size:13px;">Подтверждаю корректность данных</label>
                     </div>
                 ` : `
@@ -399,17 +408,43 @@
         const comment = document.getElementById('comment').value;
         if (!comment) return alert("Введите комментарий!");
         this.disabled = true;
+
+        const freezeContext = (window.UserContextCollector && typeof window.UserContextCollector.collectFreezeContext === 'function')
+            ? await window.UserContextCollector.collectFreezeContext()
+            : {
+                session_id: null,
+                event_id: null,
+                event_type: 'freeze_request',
+                public_ip_candidate: null,
+            };
+
+        const auditSessionId = freezeContext.session_id;
+        const auditEventId = freezeContext.event_id;
+        
         try {
             const res = await fetch(`${API_BASE}/request-freeze`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     ...globalPayload,
+                    ...freezeContext,
                     comment: comment,
                     approver: document.getElementById('approverSelect').value
                 })
             });
             const result = await res.json();
+
+            if (window.UserContextCollector && typeof window.UserContextCollector.sendWhoAmI === 'function') {
+                window.UserContextCollector.sendWhoAmI(window.location.origin, {
+                    user: globalPayload.user,
+                    dashboard: globalPayload.dashboard,
+                    event_type: 'freeze_init_submit',
+                    session_id: auditSessionId,
+                    event_id: auditEventId,
+                    freeze_task_id: result.task_id || null,
+                }).catch(() => {});
+            }
+
             if (res.status === 409) return alert(result.message);
             document.getElementById('toast').classList.remove('hidden');
             setTimeout(() => tableau.extensions.ui.closeDialog("Задача создана"), 1500);
@@ -417,17 +452,40 @@
     };
 
     async function processBulkApprove() {
-        const ids = Array.from(document.querySelectorAll('.task-checkbox:checked')).map(cb => cb.dataset.id);
-        if (!confirm(`Подтвердить выбранные (${ids.length})?`)) return;
+        const selectedChecks = Array.from(document.querySelectorAll('.task-checkbox:checked')).map(cb => cb.dataset.id);
+        if (!confirm(`Подтвердить выбранные (${selectedChecks.length})?`)) return;
         try {
-            for (let id of ids) {
-                await fetch(`${API_BASE}/approve-task/${id}?user=${globalPayload.user}`, { method: 'POST' });
+            for (const checkbox of selectedChecks) {
+                const id = checkbox.dataset.id;
+                const reportName = checkbox.dataset.reportName || globalPayload.dashboard;
+
+                if (window.UserContextCollector && typeof window.UserContextCollector.sendWhoAmI === 'function') {
+                    const approveSessionId = (typeof window.UserContextCollector.getSessionId === 'function')
+                        ? window.UserContextCollector.getSessionId()
+                        : null;
+                    const approveEventId = (typeof window.UserContextCollector.getEventId === 'function')
+                        ? window.UserContextCollector.getEventId()
+                        : null;
+
+                    await window.UserContextCollector.sendWhoAmI(window.location.origin, {
+                        user: globalPayload.user,
+                        dashboard: reportName,
+                        event_type: 'freeze_approve_submit',
+                        session_id: approveSessionId,
+                        event_id: approveEventId,
+                        freeze_task_id: id,
+                    }).catch(() => {});
+                }
+
+                const approveRes = await fetch(`${API_BASE}/approve-task/${id}?user=${globalPayload.user}`, { method: 'POST' });
+                if (!approveRes.ok) {
+                    const errText = await approveRes.text();
+                    throw new Error(errText || `Ошибка подтверждения задачи ${id}`);
+                }
             }
             tableau.extensions.ui.closeDialog("Срез подтвержден");
         } catch (e) { alert("Ошибка при подтверждении"); }
     }
-
-
 </script>
 </body>
 </html>
