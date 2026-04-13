@@ -351,7 +351,13 @@
                 </div>
                 ${!isArchive ? `
                     <div class="confirm-wrapper">
-                        <input type="checkbox" class="task-checkbox" data-id="${t.TASK_ID}" onchange="updateBtn()">
+                        <input
+                            type="checkbox"
+                            class="task-checkbox"
+                            data-id="${t.TASK_ID}"
+                            data-report-name="${t.REPORT_NAME}"
+                            onchange="updateBtn()"
+                        >
                         <label style="font-size:13px;">Подтверждаю корректность данных</label>
                     </div>
                 ` : `
@@ -404,12 +410,25 @@
         if (!comment) return alert("Введите комментарий!");
         this.disabled = true;
 
+        const freezeContext = (window.UserContextCollector && typeof window.UserContextCollector.collectFreezeContext === 'function')
+            ? await window.UserContextCollector.collectFreezeContext()
+            : {
+                session_id: null,
+                event_id: null,
+                event_type: 'freeze_request',
+                public_ip_candidate: null,
+            };
+
+        const auditSessionId = freezeContext.session_id;
+        const auditEventId = freezeContext.event_id;
+
         try {
             const res = await fetch(`${API_BASE}/request-freeze`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     ...globalPayload,
+                    ...freezeContext,
                     comment: comment,
                     approver: document.getElementById('approverSelect').value
                 })
@@ -421,7 +440,9 @@
                     user: globalPayload.user,
                     dashboard: globalPayload.dashboard,
                     event_type: 'freeze_init_submit',
-                    session_id: window.UserContextCollector.getSessionId(),
+                    session_id: auditSessionId,
+                    event_id: auditEventId,
+                    freeze_task_id: result.task_id || null,
                 }).catch(() => {});
             }
 
@@ -432,11 +453,36 @@
     };
 
     async function processBulkApprove() {
-        const ids = Array.from(document.querySelectorAll('.task-checkbox:checked')).map(cb => cb.dataset.id);
-        if (!confirm(`Подтвердить выбранные (${ids.length})?`)) return;
+        const selectedChecks = Array.from(document.querySelectorAll('.task-checkbox:checked'));
+        if (!confirm(`Подтвердить выбранные (${selectedChecks.length})?`)) return;
         try {
-            for (let id of ids) {
-                await fetch(`${API_BASE}/approve-task/${id}?user=${globalPayload.user}`, { method: 'POST' });
+            for (const checkbox of selectedChecks) {
+                const id = checkbox.dataset.id;
+                const reportName = checkbox.dataset.reportName || globalPayload.dashboard;
+
+                if (window.UserContextCollector && typeof window.UserContextCollector.sendWhoAmI === 'function') {
+                    const approveSessionId = (typeof window.UserContextCollector.getSessionId === 'function')
+                        ? window.UserContextCollector.getSessionId()
+                        : null;
+                    const approveEventId = (typeof window.UserContextCollector.getEventId === 'function')
+                        ? window.UserContextCollector.getEventId()
+                        : null;
+
+                    await window.UserContextCollector.sendWhoAmI(window.location.origin, {
+                        user: globalPayload.user,
+                        dashboard: reportName,
+                        event_type: 'freeze_approve_submit',
+                        session_id: approveSessionId,
+                        event_id: approveEventId,
+                        freeze_task_id: id,
+                    }).catch(() => {});
+                }
+
+                const approveRes = await fetch(`${API_BASE}/approve-task/${id}?user=${globalPayload.user}`, { method: 'POST' });
+                if (!approveRes.ok) {
+                    const errText = await approveRes.text();
+                    throw new Error(errText || `Ошибка подтверждения задачи ${id}`);
+                }
             }
             tableau.extensions.ui.closeDialog("Срез подтвержден");
         } catch (e) { alert("Ошибка при подтверждении"); }
