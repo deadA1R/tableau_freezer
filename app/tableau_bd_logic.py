@@ -363,8 +363,8 @@ class TableauFreezer:
             date_filter: str | None = None
         ) -> list[dict[str, Any]]:
         schema = os.getenv('VERTICA_SCHEMA', 'DM')
-        query = f"SELECT * FROM {schema}.FREEZE_WORKFLOW WHERE STATUS = %s", WorkflowStatus.APPROVED.value
-        params = []
+        query = f"SELECT * FROM {schema}.FREEZE_WORKFLOW WHERE STATUS = %s"
+        params = [WorkflowStatus.APPROVED.value]
         
         if report_filter:
             query += " AND REPORT_NAME LIKE %s"
