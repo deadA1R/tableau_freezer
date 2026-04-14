@@ -46,6 +46,18 @@ def _extract_public_ip_candidate(data: dict[str, Any]) -> str | None:
 
     return None
 
+
+def _resolve_required_freeze_task_id(data: dict[str, Any]) -> str:
+    freeze_task_id = data.get("freeze_task_id")
+    if isinstance(freeze_task_id, str) and freeze_task_id.strip():
+        return freeze_task_id.strip()
+
+    event_id = data.get("event_id")
+    if isinstance(event_id, str) and event_id.strip():
+        return f"UNBOUND:{event_id.strip()}"
+
+    return f"UNBOUND:{uuid.uuid4().hex}"
+
 class TableauFreezer:
     def __init__(self):
         self.db_path = "workflow_freeze.db"
@@ -92,8 +104,8 @@ class TableauFreezer:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS freeze_workflow_extended (
+                FREEZE_TASK_ID TEXT NOT NULL,
                 ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                FREEZE_TASK_ID TEXT,
                 SESSION_ID TEXT,
                 EVENT_ID TEXT,
                 EVENT_TYPE TEXT,
@@ -110,15 +122,85 @@ class TableauFreezer:
             """
         )
 
-        existing_columns = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(freeze_workflow_extended)").fetchall()
-        }
+        schema_rows = conn.execute("PRAGMA table_info(freeze_workflow_extended)").fetchall()
+        existing_columns = {row[1] for row in schema_rows}
         for column_name, column_type in WORKFLOW_EXTENDED_COLUMNS.items():
             if column_name not in existing_columns:
                 conn.execute(
                     f"ALTER TABLE freeze_workflow_extended ADD COLUMN {column_name} {column_type}"
                 )
+
+        first_column_name = schema_rows[0][1] if schema_rows else None
+        freeze_task_meta = next((row for row in schema_rows if row[1] == "FREEZE_TASK_ID"), None)
+        freeze_task_is_required = bool(freeze_task_meta and freeze_task_meta[3] == 1)
+
+        if first_column_name != "FREEZE_TASK_ID" or not freeze_task_is_required:
+            self._rebuild_workflow_extended_table(conn)
+
+    def _rebuild_workflow_extended_table(self, conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE freeze_workflow_extended_new (
+                FREEZE_TASK_ID TEXT NOT NULL,
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                SESSION_ID TEXT,
+                EVENT_ID TEXT,
+                EVENT_TYPE TEXT,
+                TIMESTAMP_UTC TEXT,
+                USER_AGENT TEXT,
+                ACCEPT_LANGUAGE TEXT,
+                SEC_CH_UA TEXT,
+                SEC_CH_UA_PLATFORM TEXT,
+                DEVICE_TYPE TEXT,
+                TABLEAU_USER TEXT,
+                DASHBOARD TEXT,
+                PUBLIC_IP_CANDIDATE TEXT
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            INSERT INTO freeze_workflow_extended_new (
+                FREEZE_TASK_ID,
+                ID,
+                SESSION_ID,
+                EVENT_ID,
+                EVENT_TYPE,
+                TIMESTAMP_UTC,
+                USER_AGENT,
+                ACCEPT_LANGUAGE,
+                SEC_CH_UA,
+                SEC_CH_UA_PLATFORM,
+                DEVICE_TYPE,
+                TABLEAU_USER,
+                DASHBOARD,
+                PUBLIC_IP_CANDIDATE
+            )
+            SELECT
+                COALESCE(
+                    NULLIF(TRIM(FREEZE_TASK_ID), ''),
+                    'UNBOUND:' || COALESCE(NULLIF(TRIM(EVENT_ID), ''), LOWER(HEX(RANDOMBLOB(8))))
+                ),
+                ID,
+                SESSION_ID,
+                EVENT_ID,
+                EVENT_TYPE,
+                TIMESTAMP_UTC,
+                USER_AGENT,
+                ACCEPT_LANGUAGE,
+                SEC_CH_UA,
+                SEC_CH_UA_PLATFORM,
+                DEVICE_TYPE,
+                TABLEAU_USER,
+                DASHBOARD,
+                PUBLIC_IP_CANDIDATE
+            FROM freeze_workflow_extended
+            """
+        )
+
+        conn.execute("DROP TABLE freeze_workflow_extended")
+        conn.execute("ALTER TABLE freeze_workflow_extended_new RENAME TO freeze_workflow_extended")
 
     def _init_db_2(self):
         warnings.warn(
@@ -279,6 +361,7 @@ class TableauFreezer:
     def insert_workflow_extended_event(self, event_payload: dict[str, Any]) -> dict[str, Any]:
         server_context = event_payload.get("server_context") or {}
         client_hints = server_context.get("client_hints") or {}
+        freeze_task_id = _resolve_required_freeze_task_id(event_payload)
 
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
@@ -300,7 +383,7 @@ class TableauFreezer:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    event_payload.get("freeze_task_id"),
+                    freeze_task_id,
                     event_payload.get("session_id"),
                     event_payload.get("event_id"),
                     event_payload.get("event_type"),
