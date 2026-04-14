@@ -396,3 +396,46 @@ def test_audit_user_context_persists_extended_table_row():
     assert row["TABLEAU_USER"] == "tableau_user_1"
     assert row["DASHBOARD"] == "audit_dashboard"
     assert row["PUBLIC_IP_CANDIDATE"] == "77.240.44.25"
+
+
+def test_extended_table_schema_freeze_task_id_is_first_and_required():
+    with sqlite3.connect(TEST_DB_PATH) as conn:
+        columns = conn.execute("PRAGMA table_info(freeze_workflow_extended)").fetchall()
+
+    assert len(columns) > 0
+    first_column = columns[0]
+    assert first_column[1] == "FREEZE_TASK_ID"
+    assert first_column[3] == 1
+
+
+def test_extended_table_generates_required_freeze_task_id_when_missing():
+    response = client.post(
+        "/audit/user-context",
+        headers={
+            "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36",
+        },
+        json={
+            "user": "tableau_user_2",
+            "dashboard": "audit_dashboard_missing_task",
+            "session_id": "sess-ext-2",
+            "event_id": "evt-ext-no-task",
+            "event_type": "audit_probe",
+            "client_context": {},
+        },
+    )
+
+    assert response.status_code == 200
+
+    with sqlite3.connect(TEST_DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT FREEZE_TASK_ID
+            FROM freeze_workflow_extended
+            WHERE EVENT_ID = ?
+            """,
+            ("evt-ext-no-task",),
+        ).fetchone()
+
+    assert row is not None
+    assert row["FREEZE_TASK_ID"] == "UNBOUND:evt-ext-no-task"
