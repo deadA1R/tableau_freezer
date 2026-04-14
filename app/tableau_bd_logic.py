@@ -108,7 +108,7 @@ class TableauFreezer:
                 with conn.cursor() as cursor:
                     # Check if a pending request already exists for this period
                     cursor.execute(
-                        f"SELECT STATUS, APPROVER_USER, FROM {schema}.FREEZE_WORKFLOW WHERE PERIOD = %s AND REPORT_NAME = %s AND INIT_USER = %s AND APPROVER_USER = %s AND STATUS IN (%s, %s)", 
+                        f"SELECT STATUS, APPROVER_USER FROM {schema}.FREEZE_WORKFLOW WHERE PERIOD = %s AND REPORT_NAME = %s AND INIT_USER = %s AND APPROVER_USER = %s AND STATUS IN (%s, %s)", 
                         (period_key, report, initiator, approver, WorkflowStatus.PENDING.value, WorkflowStatus.APPROVED.value)
                     )
                     exists = cursor.fetchone()
@@ -173,7 +173,7 @@ class TableauFreezer:
             with self._get_db_connection() as conn:
                 with conn.cursor() as cursor:
                     cursor.execute(
-                        "SELECT TASK_ID, SESSION_ID, EVENT_ID, EVENT_TYPE, PUBLIC_IP_CANDIDATE FROM {schema}.FREEZE_WORKFLOW WHERE TASK_ID = %s",
+                        f"SELECT TASK_ID, SESSION_ID, EVENT_ID, EVENT_TYPE, PUBLIC_IP_CANDIDATE FROM {schema}.FREEZE_WORKFLOW WHERE TASK_ID = %s",
                         (task_id,),
                     )
                     existing = cursor.fetchone()
@@ -186,9 +186,9 @@ class TableauFreezer:
                         }
 
                     if (
-                        existing["SESSION_ID"]
+                        existing[1]
                         and session_id
-                        and existing["SESSION_ID"] != session_id
+                        and existing[1] != session_id
                     ):
                         return {
                             "matched_task": True,
@@ -197,8 +197,8 @@ class TableauFreezer:
                         }
 
                     cursor.execute(
-                        """
-                        UPDATE FREEZE_WORKFLOW
+                        f"""
+                        UPDATE {schema}.FREEZE_WORKFLOW
                         SET SESSION_ID = COALESCE(SESSION_ID, %s),
                             EVENT_ID = COALESCE(EVENT_ID, %s),
                             EVENT_TYPE = COALESCE(EVENT_TYPE, %s),
@@ -210,7 +210,7 @@ class TableauFreezer:
 
                     return {
                         "matched_task": True,
-                        "updated": conn.total_changes > 0,
+                        "updated": cursor.rowcount > 0,
                         "message": "Контекст сопоставлен по task_id",
                     }
         except Exception as e:
@@ -262,7 +262,7 @@ class TableauFreezer:
                     
                     return {
                         "saved": True,
-                        "row_id": cursor.rowcount,
+                        "row_id": cursor.rowcount > 0,
                         "table": f"{schema}.FREEZE_WORKFLOW_EXTENDED"
                     }
         except Exception as e:
@@ -399,7 +399,7 @@ class TableauFreezer:
                         WHERE TASK_ID = %s
                     """
                     
-                    cursor.execute(query, (WorkflowStatus.VOIDED.value, f" | [ОТЗЫВ {admin_user}: {comment}]", task_id, dt.now()))
+                    cursor.execute(query, (WorkflowStatus.VOIDED.value, f" | [ОТЗЫВ {admin_user}: {comment}]", dt.now(), task_id))
                 return {"success": True}
         except Exception as e:
             return {"success": False, "message": str(e)}
