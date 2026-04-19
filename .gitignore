@@ -15,6 +15,7 @@ __pycache__/
 
 # Локальные сертификаты
 *.pem
+
 user_context_events.jsonl
 
 # Coverage
