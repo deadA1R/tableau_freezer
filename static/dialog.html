@@ -50,7 +50,7 @@
             position: relative;
             overflow: hidden;
         }
-        /* subtle circle texture */
+
         .hdr::before,
         .hdr::after {
             content: '';
@@ -135,7 +135,7 @@
             gap: 2px;
             position: relative;
         }
-        /* sliding underline indicator */
+
         .tab-bar::after {
             content: '';
             position: absolute;
@@ -223,7 +223,6 @@
         }
         .card-details { font-size: 13px; line-height: 1.6; }
 
-        /* Period highlight */
         #periodInfo {
             font-family: var(--mono);
             font-size: 15px;
@@ -358,11 +357,9 @@
             box-shadow: 0 4px 16px rgba(45,107,66,.08);
             transform: translateY(-1px);
         }
-        /* pending — gold left stripe */
         .task-item:not([style*="border-left: 4px solid #007A41"]) {
             border-left: 3px solid var(--au1);
         }
-        /* archive — green left stripe (override inline style) */
         .task-item[style*="border-left"] {
             border-left: 3px solid var(--g2) !important;
             background: var(--sf) !important;
@@ -383,7 +380,6 @@
             line-height: 1.3;
             flex: 1;
         }
-        /* archived badge override */
         .task-item span[style*="color:#007A41"] {
             color: var(--g1) !important;
             font-size: 10.5px !important;
@@ -428,7 +424,6 @@
             user-select: none;
         }
 
-        /* Void button (archive tab) */
         .q-btn[onclick*="voidTask"] {
             display: block !important;
             width: 100% !important;
@@ -446,7 +441,6 @@
             border-color: #D06060 !important;
         }
 
-        /* Duplicate warning (injected via innerHTML) */
         div[style*="background: #fff4f4"] {
             background: #FEF9ED !important;
             border: 1.5px solid #EDD080 !important;
@@ -494,7 +488,6 @@
         }
         input::placeholder { color: var(--gr1); }
 
-        /* Empty state */
         .empty-state {
             display: flex;
             flex-direction: column;
@@ -545,7 +538,6 @@
         }
         .btn:active { transform: scale(.97); }
 
-        /* cancel */
         .footer .btn:first-child {
             background: var(--sf2);
             color: var(--ink-2);
@@ -554,7 +546,6 @@
         }
         .footer .btn:first-child:hover { background: var(--sf3); }
 
-        /* primary */
         #requestBtn, #bulkApproveBtn {
             background: var(--g1);
             color: #fff;
@@ -575,8 +566,56 @@
 
         .hidden { display: none !important; }
 
-        /* Field spacing helpers */
         .field-block { margin-bottom: 14px; }
+
+        /* ── Блок зависимостей ── */
+        .deps-block {
+            background: #fff;
+            border-radius: 8px;
+            padding: 12px 14px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            margin-bottom: 15px;
+            border-left: 4px solid #e0a800;
+        }
+        .deps-block.deps-ok {
+            border-left-color: #007A41;
+        }
+        .deps-block-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #555;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .deps-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        .deps-list li {
+            font-size: 12px;
+            padding: 4px 0;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            border-bottom: 1px solid #f0f0f0;
+            color: #444;
+        }
+        .deps-list li:last-child { border-bottom: none; }
+        .dep-icon-ok   { color: #007A41; font-size: 14px; flex-shrink: 0; }
+        .dep-icon-miss { color: #c0392b; font-size: 14px; flex-shrink: 0; }
+        .deps-spinner  { font-size: 12px; color: #999; }
+        .deps-blocker-msg {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #c0392b;
+            background: #fff5f5;
+            border: 1px solid #f5c6cb;
+            border-radius: 5px;
+            padding: 7px 10px;
+        }
     </style>
 </head>
 <body>
@@ -610,6 +649,18 @@
                 <div class="card-details">
                     <div id="periodInfo" style="margin-bottom: 8px; font-weight: bold; color: #007A41;"></div>
                     <div id="reportDetails"></div>
+                </div>
+            </div>
+
+            <!-- Блок зависимостей: виден только если у отчёта есть пред-требования -->
+            <div id="depsBlock" class="deps-block hidden">
+                <div class="deps-block-title">
+                    <span id="depsIcon">⏳</span>
+                    <span id="depsTitle">Проверка предварительных условий...</span>
+                </div>
+                <ul id="depsList" class="deps-list"></ul>
+                <div id="depsBlockerMsg" class="deps-blocker-msg hidden">
+                    Нельзя создать срез: сначала необходимо подтвердить все отчёты выше за этот период.
                 </div>
             </div>
 
@@ -672,6 +723,7 @@
     let globalPayload = {};
     let isAdmin = false; 
     let allTasksCache = [];
+    let depsBlocingRequest = false;
     const API_BASE = window.location.origin;
 
     // --- ЛОГИКА ТАБОВ ---
@@ -679,20 +731,16 @@
         const tabs = document.querySelectorAll('.tab');
         const panes = document.querySelectorAll('.tab-content');
 
-        // деактивируем всё
         tabs.forEach(t => t.classList.remove('active'));
         panes.forEach(p => p.classList.remove('active'));
 
-        // активируем нужное
         const activeTab = document.querySelector(`.tab[data-tab="${tabName}"]`);
         const activePane = document.getElementById(`tab-content-${tabName}`);
         if (activeTab)  activeTab.classList.add('active');
         if (activePane) activePane.classList.add('active');
 
-        // двигаем underline-индикатор
         moveIndicator(activeTab);
 
-        // Управление кнопками в футере
         const reqBtn = document.getElementById('requestBtn');
         const bulkBtn = document.getElementById('bulkApproveBtn');
 
@@ -718,7 +766,6 @@
         bar.style.removeProperty('display'); // trigger paint
     }
 
-    // inject indicator CSS vars after DOM ready
     document.getElementById('mainTabs').style.cssText +=
         '; position:relative;';
     document.head.insertAdjacentHTML('beforeend', `<style>
@@ -734,6 +781,59 @@
         const checked = document.querySelectorAll('.task-checkbox:checked');
         const btn = document.getElementById('bulkApproveBtn');
         if (btn) btn.disabled = checked.length === 0;
+    }
+
+      async function checkAndRenderDependencies(report, periodStart, periodEnd) {
+        const block   = document.getElementById('depsBlock');
+        const list    = document.getElementById('depsList');
+        const title   = document.getElementById('depsTitle');
+        const icon    = document.getElementById('depsIcon');
+        const blocker = document.getElementById('depsBlockerMsg');
+        const reqBtn  = document.getElementById('requestBtn');
+
+        block.classList.remove('hidden', 'deps-ok');
+        list.innerHTML = '<li><span class="deps-spinner">⏳ Проверяем...</span></li>';
+        title.textContent = 'Проверка предварительных условий...';
+        icon.textContent = '⏳';
+        blocker.classList.add('hidden');
+        depsBlocingRequest = false;
+
+        let data;
+        try {
+            const url = `${API_BASE}/check-dependencies?report=${encodeURIComponent(report)}&period_start=${encodeURIComponent(periodStart)}&period_end=${encodeURIComponent(periodEnd)}`;
+            const res = await fetch(url);
+            data = await res.json();
+        } catch (e) {
+            list.innerHTML = '<li style="color:#999;">Не удалось проверить зависимости</li>';
+            return;
+        }
+
+        if (!data.has_dependencies) {
+            block.classList.add('hidden');
+            return;
+        }
+
+        list.innerHTML = data.required.map(dep => {
+            const ok = data.approved.includes(dep);
+            return `<li>
+                <span class="${ok ? 'dep-icon-ok' : 'dep-icon-miss'}">${ok ? '✔' : '✘'}</span>
+                <span style="${ok ? '' : 'color:#c0392b;'}">${dep}</span>
+            </li>`;
+        }).join('');
+
+        if (data.all_approved) {
+            block.classList.add('deps-ok');
+            icon.textContent = '✅';
+            title.textContent = 'Все предварительные условия выполнены';
+            depsBlocingRequest = false;
+        } else {
+            icon.textContent = '⚠️';
+            title.textContent = `Не подтверждено: ${data.missing.length} из ${data.required.length}`;
+            blocker.classList.remove('hidden');
+            depsBlocingRequest = true;
+        }
+
+        reqBtn.disabled = depsBlocingRequest;
     }
 
     // --- ИНИЦИАЛИЗАЦИЯ ---
@@ -753,6 +853,12 @@
             document.getElementById('tab-pending').classList.remove('hidden');
             document.getElementById('tab-archive').classList.remove('hidden');
         }
+
+         checkAndRenderDependencies(
+            globalPayload.dashboard,
+            globalPayload.period_start,
+            globalPayload.period_end
+        );
         
         checkWorkflowStatus();
     });
@@ -922,6 +1028,11 @@
 
     // --- API ---
     document.getElementById('requestBtn').onclick = async function() {
+        if (depsBlocingRequest) {
+            alert('Невозможно создать срез: сначала подтвердите все необходимые отчёты за этот период.');
+            return;
+        }
+
         const comment = document.getElementById('comment').value;
         if (!comment) return alert("Введите комментарий!");
         this.disabled = true;
@@ -950,6 +1061,15 @@
                 })
             });
             const result = await res.json();
+
+            if (res.status === 422) {
+                const detail = result.detail || result;
+                const deps = detail.dependencies || {};
+                const missingNames = (deps.missing || []).join('\n• ');
+                alert(`Ошибка: не подтверждены необходимые отчёты за этот период:\n• ${missingNames}`);
+                this.disabled = false;
+                return;
+            }
 
             if (window.UserContextCollector && typeof window.UserContextCollector.sendWhoAmI === 'function') {
                 window.UserContextCollector.sendWhoAmI(window.location.origin, {
@@ -1004,7 +1124,6 @@
         } catch (e) { alert("Ошибка при подтверждении"); }
     }
 
-     // init indicator position after fonts load
     window.addEventListener('load', () => {
         const firstActive = document.querySelector('.tab.active');
         if (firstActive) moveIndicator(firstActive);

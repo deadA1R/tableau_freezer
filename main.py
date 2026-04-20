@@ -114,8 +114,10 @@ async def request_freeze(request_data: FreezeRequest, request: Request):
             return res
 
         trigger_notification(res["approver"], f"Нужен аппрув для {request_data.dashboard}")
+        print(res)
         return res
     except HTTPException:
+        print('Отчет не добавлен в справочник!')
         raise
     except Exception as e:
         print(f"❌ Error: {e}")
@@ -160,6 +162,26 @@ async def api_void_task(task_id: str, data: VoidRequest):
     
     return result # вернет {"success": True/False, "message": "..."} 
 
+@app.get("/check-dependencies")
+async def check_dependencies(
+    report: str = Query(..., description="Название отчёта"),
+    period_start: str = Query(..., description="Дата начала периода, например 01.01.2025"),
+    period_end: str = Query(..., description="Дата окончания периода, например 31.01.2025"),
+):
+    """
+    Возвращает статус зависимостей для отчёта за указанный период.
+ 
+    Пример ответа, когда зависимости не выполнены:
+    {
+      "has_dependencies": true,
+      "all_approved": false,
+      "required": ["Слайд 5.1. ...", ...],
+      "approved": ["Слайд 5.1. ..."],
+      "missing": ["Слайд 5.2. ...", ...]
+    }
+    """
+    period_key = f"{period_start}_{period_end}"
+    return freezer.check_dependencies(report, period_key)
 
 @app.get("/debug/user-context")
 async def debug_user_context(request: Request):

@@ -5,7 +5,7 @@ import os
 import warnings
 from datetime import datetime
 from typing import Any
-from app.report_registry import REPORTS_SQL
+from app.report_registry import REPORTS_SQL, REPORT_DEPENDENCIES
 from app.statuses import WorkflowStatus, RequestResultStatus
 
 
@@ -32,6 +32,47 @@ WORKFLOW_EXTENDED_COLUMNS: dict[str, str] = {
     "PUBLIC_IP_CANDIDATE": "TEXT",
 }
 
+REPORTS_WITH_REPORT_DATE = {
+    "Слайд 5.5. Отчет по доходности ЦБ в тенге",
+    "Слайд 5.6. Отчет по доходности ЦБ в валюте",
+}
+
+def _resolve_period_dates(report_name: str, params: dict[str, Any]) -> tuple[str, str]:
+    if report_name in REPORTS_WITH_REPORT_DATE:
+        report_date_raw = (
+            params.get("Дата отчета")
+            or params.get("ReportDate")
+            or "all"
+        )
+        d_e = report_date_raw
+ 
+        # Вычисляем 01.01.Year из даты отчёта
+        for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+            try:
+                date_t = datetime.strptime(report_date_raw, fmt)
+                print(date_t)
+                d_s = f"01.01.{date_t.year}"
+                break
+            except ValueError:
+                print(report_date_raw)
+                continue
+        else:
+            d_s = "all"
+ 
+        return d_s, d_e
+    
+    d_s = (
+        params.get("DateStart")
+        or params.get("Дата начала периода")
+        or "all"
+    )
+    d_e = (
+        params.get("DateEnd")
+        or params.get("Дата окончания периода")
+        or "all"
+    )
+    
+    return d_s, d_e
 
 def _extract_public_ip_candidate(data: dict[str, Any]) -> str | None:
     top_level_value = data.get("public_ip_candidate")
@@ -212,7 +253,6 @@ class TableauFreezer:
         try:
             with self._get_db_connection() as conn:
                 with conn.cursor() as cursor:
-                    # Таблица воркфлоу (уже есть)
                     cursor.execute(f"""
                         CREATE TABLE IF NOT EXISTS {schema}.FREEZE_WORKFLOW (
                             TASK_ID VARCHAR(50), REPORT_NAME VARCHAR(255),
@@ -227,6 +267,62 @@ class TableauFreezer:
         except Exception as e:
             print(f"Failed to initialize Vertica tables: {e}")
 
+    def check_dependencies(
+        self, report_name: str, period_key: str
+    ) -> dict[str, Any]:
+        """
+        Проверяет, все ли предварительные отчёты для данного report_name
+        имеют статус APPROVED за period_key.
+
+        Возвращает словарь:
+          {
+            "has_dependencies": bool,   # есть ли зависимости вообще
+            "all_approved":    bool,    # все ли подтверждены
+            "required":        list,    # полный список зависимостей
+            "approved":        list,    # уже подтверждённые
+            "missing":         list,    # ещё не подтверждённые
+          }
+        """
+        required = REPORT_DEPENDENCIES.get(report_name, [])
+
+        if not required:
+            return {
+                "has_dependencies": False,
+                "all_approved": True,
+                "required": [],
+                "approved": [],
+                "missing": [],
+            }
+
+        approved = []
+        missing = []
+
+        with sqlite3.connect(self.db_path) as conn:
+            for dep in required:
+                row = conn.execute(
+                    """
+                    SELECT TASK_ID FROM FREEZE_WORKFLOW
+                    WHERE REPORT_NAME = ?
+                      AND PERIOD = ?
+                      AND STATUS = ?
+                    LIMIT 1
+                    """,
+                    (dep, period_key, WorkflowStatus.APPROVED.value),
+                ).fetchone()
+
+                if row:
+                    approved.append(dep)
+                else:
+                    missing.append(dep)
+
+        return {
+            "has_dependencies": True,
+            "all_approved": len(missing) == 0,
+            "required": required,
+            "approved": approved,
+            "missing": missing,
+        }
+    
     def create_request(self, data: dict[str, Any]) -> dict[str, Any]:
         try:
             report = data.get('dashboard', 'Unknown')
@@ -236,11 +332,22 @@ class TableauFreezer:
             event_type = data.get("event_type")
             public_ip_candidate = _extract_public_ip_candidate(data)
             
-            d_s = params.get('DateStart') or params.get('Дата начала периода') or "all"
-            d_e = params.get('DateEnd') or params.get('Дата окончания периода') or "all"
+            d_s, d_e = _resolve_period_dates(report, params)
             period_key = f"{d_s}_{d_e}"
             approver = data.get('approver', 'tabladmin') 
             initiator = data.get('user', 'unknown')
+
+            dep_check = self.check_dependencies(report, period_key)
+            if dep_check["has_dependencies"] and not dep_check["all_approved"]:
+                return {
+                    "success": False,
+                    "status": "DEPENDENCIES_NOT_MET",
+                    "message": (
+                        f"Невозможно создать задачу: не все обязательные отчёты "
+                        f"подтверждены за период {period_key}."
+                    ),
+                    "dependencies": dep_check,
+                }
             
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
