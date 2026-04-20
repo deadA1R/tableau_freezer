@@ -724,7 +724,42 @@
     let isAdmin = false; 
     let allTasksCache = [];
     let depsBlocingRequest = false;
+    let duplicateBlocking  = false;
+
     const API_BASE = window.location.origin;
+
+    const REPORTS_WITH_REPORT_DATE = new Set([
+        "Слайд 5.5. Отчет по доходности ЦБ в тенге",
+        "Слайд 5.6. Отчет по доходности ЦБ в валюте",
+    ]);
+
+    function resolveEffectivePeriod(dashboard, params) {
+        if (REPORTS_WITH_REPORT_DATE.has(dashboard)) {
+            const raw = params['Дата отчета'] || params['ReportDate'] || '';
+            const d_e = raw;
+            let d_s = 'all';
+            if (raw) {
+                const dotMatch = raw.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+                const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+                if (dotMatch)     d_s = `01.01.${dotMatch[3]}`;
+                else if (isoMatch) d_s = `01.01.${isoMatch[1]}`;
+            }
+            return { start: d_s, end: d_e };
+        }
+        const start = params['DateStart']
+                   || params['Дата начала периода']
+                   || globalPayload.period_start
+                   || 'all';
+        const end   = params['DateEnd']
+                   || params['Дата окончания периода']
+                   || globalPayload.period_end
+                   || 'all';
+        return { start, end };
+    }
+
+    function syncRequestBtn() {
+        document.getElementById('requestBtn').disabled = depsBlocingRequest || duplicateBlocking;
+    }
 
     // --- ЛОГИКА ТАБОВ ---
     function showTab(tabName) {
@@ -854,16 +889,18 @@
             document.getElementById('tab-archive').classList.remove('hidden');
         }
 
-         checkAndRenderDependencies(
+        const effPeriod = resolveEffectivePeriod(globalPayload.dashboard, globalPayload.params || {});
+
+        checkAndRenderDependencies(
             globalPayload.dashboard,
-            globalPayload.period_start,
-            globalPayload.period_end
+            effPeriod.start,
+            effPeriod.end
         );
         
-        checkWorkflowStatus();
+        checkWorkflowStatus(effPeriod);
     });
 
-    async function checkWorkflowStatus() {
+    async function checkWorkflowStatus(effPeriod) {
         try {
             const user = globalPayload.user;
             const ts = Date.now();
@@ -881,7 +918,7 @@
 
             document.getElementById('loader').classList.add('hidden');
 
-            fillInitiatorParams();
+            fillInitiatorParams(effPeriod);
 
             if (pendingTasks.length > 0) {
                 renderTasksTo(pendingTasks, 'pending-container', false);
@@ -894,7 +931,7 @@
                 renderTasksTo(allTasksCache, 'archive-container', true);
             }
 
-            const currentPeriod = `${globalPayload.period_start}_${globalPayload.period_end}`;
+            const currentPeriod = `${effPeriod.start}_${effPeriod.end}`;
             const isDuplicate = [...pendingTasks, ...allTasksCache].some(t => 
                 t.REPORT_NAME === globalPayload.dashboard && t.PERIOD === currentPeriod && (t.STATUS === "APPROVED" || t.STATUS === "PENDING")
             );
@@ -905,12 +942,22 @@
         }
     }
 
-    function fillInitiatorParams() {
-        document.getElementById('periodInfo').innerText = `Период: ${globalPayload.period_start} — ${globalPayload.period_end}`;
-        let details = "";
-        for (let [k, v] of Object.entries(globalPayload.params)) {
-            if (!['DateStart', 'DateEnd'].includes(k)) {
-                details += `<div style="font-size:11px; margin-bottom:2px;"><b>${k}:</b> ${v}</div>`;
+    function fillInitiatorParams(effPeriod) {
+        // Показываем эффективный период — для 5.5/5.6 это 01.01.YYYY — Дата отчета
+        const s = effPeriod ? effPeriod.start : globalPayload.period_start;
+        const e = effPeriod ? effPeriod.end   : globalPayload.period_end;
+        document.getElementById('periodInfo').innerText = `Период: ${s} — ${e}`;
+ 
+        let details = '';
+        const params = globalPayload.params || {};
+        if (REPORTS_WITH_REPORT_DATE.has(globalPayload.dashboard)) {
+            const reportDate = params['Дата отчета'] || params['ReportDate'] || '';
+            if (reportDate) {
+                details = `<div style="font-size:11px;margin-bottom:2px;"><b>Дата отчета:</b> ${reportDate}</div>`;
+            }
+        } else {
+            for (const [k, v] of Object.entries(params)) {
+                details += `<div style="font-size:11px;margin-bottom:2px;"><b>${k}:</b> ${v}</div>`;
             }
         }
         document.getElementById('reportDetails').innerHTML = details;
@@ -1020,8 +1067,12 @@
     }
 
     function showDuplicateWarning(period) {
-        const warning = `<div style="background: #fff4f4; border: 1px solid #f5c6cb; padding: 10px; border-radius: 6px; margin-bottom: 10px; color: #721c24; font-size: 13px;">
+        duplicateBlocking = true;
+        syncRequestBtn();
+
+        const warning = `<div style="background:#fff4f4;border:1px solid #f5c6cb;padding:10px;border-radius:6px;margin-bottom:10px;color:#721c24;font-size:13px;">
             <strong>⚠️ Внимание:</strong> Срез за период <u>${period}</u> уже существует.
+            Чтобы создать новый — аннулируйте существующий в разделе «Архив».
         </div>`;
         document.getElementById('periodInfo').insertAdjacentHTML('beforebegin', warning);
     }
