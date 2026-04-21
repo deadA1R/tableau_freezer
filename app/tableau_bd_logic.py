@@ -16,8 +16,8 @@ from app.statuses import WorkflowStatus, RequestResultStatus
 from app.config import REPORTS_WITH_REPORT_DATE, REPORT_5_8_NAME, REPORT_5_8_WORKBOOK, REPORT_5_8_WORKSHEET, WORKFLOW_CONTEXT_COLUMNS, WORKFLOW_EXTENDED_COLUMNS
 
 import tableauserverclient as TSC
-
 from dotenv import load_dotenv
+
 load_dotenv()
 
 def _resolve_period_dates(report_name: str, params: dict[str, Any]) -> tuple[str, str]:
@@ -156,7 +156,8 @@ class TableauFreezer:
                 FREEZING_PERIOD_END   TEXT,
                 DATE_FREEZE   TEXT,
                 LOAD_DATE     TEXT,
-                DATA_JSON     TEXT   -- JSON одной строки; заменим на явные колонки после RDP
+                NAME_INDICATOR     TEXT,
+                VALUE_INDICATOR     TEXT
             )
         """
         )
@@ -677,8 +678,8 @@ class TableauFreezer:
                             SNAPSHOT_ID, INIT_USER, APPROVER_USER,
                             FREEZING_PERIOD_START, FREEZING_PERIOD_END,
                             DATE_FREEZE, LOAD_DATE,
-                            DATA_JSON
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            NAME_INDICATOR, VALUE_INDICATOR
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             task['TASK_ID'],
@@ -688,7 +689,8 @@ class TableauFreezer:
                             d_end,
                             approve_ts[:10],
                             approve_ts,
-                            row.to_json(force_ascii=False),
+                            row.iloc[0],
+                            row.iloc[1]
                         ),
                     )
                 conn.commit()
@@ -697,28 +699,7 @@ class TableauFreezer:
         except Exception as e:
             print(f"Ошибка _save_df_to_summary_table: {e}")
             return {"saved": False, "reason": str(e)}
- 
-    def get_summary_report(self, snapshot_id: str) -> dict[str, Any] | None:
-        """Возвращает запись сводного отчёта 5.8 по snapshot_id.
-        DATA_JSON разбирается в словарь и добавляется как 'data'.
-        """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute(
-                """
-                SELECT * FROM FROZEN_SUMMARY_REPORT_PROFITABILITY
-                WHERE SNAPSHOT_ID = ?
-                """,
-                (snapshot_id,),
-            ).fetchone()
-            if not row:
-                return None
-            entry = dict(row)
-            try:
-                entry['data'] = json.loads(entry['DATA_JSON'])
-            except Exception:
-                entry['data'] = None
-            return entry
+
 
     def get_user_tasks(self, username: str) -> list[dict[str, Any]]:
         with sqlite3.connect(self.db_path) as conn:
