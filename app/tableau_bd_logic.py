@@ -17,6 +17,9 @@ from app.config import REPORTS_WITH_REPORT_DATE, REPORT_5_8_NAME, REPORT_5_8_WOR
 
 import tableauserverclient as TSC
 
+from dotenv import load_dotenv
+load_dotenv()
+
 def _resolve_period_dates(report_name: str, params: dict[str, Any]) -> tuple[str, str]:
     if report_name in REPORTS_WITH_REPORT_DATE:
         report_date_raw = (
@@ -146,9 +149,9 @@ class TableauFreezer:
         """Создаёт таблицу для заморозки сводной формы 5.8."""
         conn.execute("""
             CREATE TABLE IF NOT EXISTS FROZEN_SUMMARY_REPORT_PROFITABILITY (
-                SNAPSHOT_ID   TEXT PRIMARY KEY,
-                INIT          TEXT,
-                APPROVER      TEXT,
+                SNAPSHOT_ID   TEXT,
+                INIT_USER          TEXT,
+                APPROVER_USER      TEXT,
                 FREEZING_PERIOD_START TEXT,
                 FREEZING_PERIOD_END   TEXT,
                 DATE_FREEZE   TEXT,
@@ -644,6 +647,7 @@ class TableauFreezer:
         try:
             df = self.get_view_data(target_path, tableau_params)
             print(f"[5.8] Получено {len(df)} строк, {len(df.columns)} колонок")
+            print(df)
             print(f"[5.8] Колонки: {list(df.columns)}")
         except Exception as e:
             return {"saved": False, "reason": f"Ошибка выгрузки из Tableau: {e}"}
@@ -673,8 +677,8 @@ class TableauFreezer:
                             SNAPSHOT_ID, INIT_USER, APPROVER_USER,
                             FREEZING_PERIOD_START, FREEZING_PERIOD_END,
                             DATE_FREEZE, LOAD_DATE,
-                            ROW_INDEX, ROW_DATA_JSON
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            DATA_JSON
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             task['TASK_ID'],
@@ -684,7 +688,6 @@ class TableauFreezer:
                             d_end,
                             approve_ts[:10],
                             approve_ts,
-                            int(idx),
                             row.to_json(force_ascii=False),
                         ),
                     )
