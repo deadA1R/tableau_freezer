@@ -140,7 +140,42 @@ BASE_DETAILED_REPORT = """SELECT * FROM (
             AND final_data."DM_DATE" <= '{DateEnd}'"""
 
 
-PROFITABILITY_REPORT = """"""
+PROFITABILITY_REPORT_MAIN = """
+    SELECT 
+        '{SnapshotID}' as "SNAPSHOT_ID",
+        '{IninUser}' as "INIT",
+        '{ApproverUser}' as "APPROVER",
+        '{DateStart}' AS "FREEZING_PERIOD_START",
+        '{DateEnd}' AS "FREEZING_PERIOD_END",
+        CURRENT_DATE as "DATE_FREEZE",
+        GETDATE() AS "LOAD_DATE",
+        "dm_limit_contract"."AMOUNT_CLOSE", +
+        "dm_limit_contract"."BALANCE_AMOUNT_LCY", 
+        "dm_limit_contract"."BANK_NAME",
+        "dm_limit_contract"."CURRENCY_CODE",
+        "dm_limit_contract"."DATE_END",
+        "dm_limit_contract"."DATE_START",
+        "dm_limit_contract"."DM_DATE",
+        "dm_limit_contract"."GUAR_PROJ_NAME",
+        "dm_limit_contract"."INTEREST_PERIOD",
+        "dm_limit_contract"."INTEREST_RATE" ,
+        "dm_limit_contract"."LIMIT_DEAL_ID" ,
+        "dm_limit_contract"."LIMIT_TOOL_CODE" ,
+        "dm_limit_contract"."LIMIT_TOOL_NAME" ,
+        "dm_limit_contract"."NOT_INCLUDED_TO_INCOME" ,
+        "dm_limit_contract"."ORGANIZATION_NAME_LEGAL" ,
+        "dm_limit_contract"."ORGANIZATION_NAME_SHORT" ,
+FROM "DM"."DM_LIMIT_CONTRACT" "dm_limit_contract"
+        WHERE "dm_limit_contract"."CURRENCY_CODE" = 'KZT' AND "dm_limit_contract"."LIMIT_TOOL_CODE" = {ToolCode}
+        AND "dm_limit_contract"."DM_DATE" >= '{DateStart}'
+        AND "dm_limit_contract"."DM_DATE" <= '{DateEnd}'
+"""
+
+PROFITABILITY_REPORT_MAIN_CURRENCY = """"""
+
+PROFITABILITY_REPORT_SECURITIES = """"""
+
+PROFITABILITY_REPORT_SUMMARY = """пш"""
 
 REPORT_DEPENDENCIES: dict[str, list[str]] = {
     "Слайд 5.8. Сводная форма доходности Финансовых инструментов": [
@@ -188,35 +223,35 @@ REPORTS_SQL = {
         "tool_code": 7  
     },
     "Слайд 5.1. Отчет по доходности депозитов в тенге": {
-        "template": PROFITABILITY_REPORT,
-        "tool_code": 7  
+        "template": PROFITABILITY_REPORT_MAIN,
+        "tool_code": 2  
     },
     "Слайд 5.2. Отчет по доходности депозитов в валюте": {
-        "template": PROFITABILITY_REPORT,
-        "tool_code": 7  
+        "template": PROFITABILITY_REPORT_MAIN_CURRENCY,
+        "tool_code": 2  
     },
     "Слайд 5.3. Отчет по доходности текущих счетов в тенге": {
-        "template": PROFITABILITY_REPORT,
+        "template": PROFITABILITY_REPORT_MAIN,
         "tool_code": 7  
     },
     "Слайд 5.4. Отчет по доходности текущих счетов в валюте": {
-        "template": PROFITABILITY_REPORT,
+        "template": PROFITABILITY_REPORT_MAIN_CURRENCY,
         "tool_code": 7  
     },
     "Слайд 5.5. Отчет по доходности ЦБ в тенге": {
-        "template": PROFITABILITY_REPORT,
+        "template": PROFITABILITY_REPORT_SECURITIES,
         "tool_code": 7  
     },
     "Слайд 5.6. Отчет по доходности ЦБ в валюте": {
-        "template": PROFITABILITY_REPORT,
+        "template": PROFITABILITY_REPORT_SECURITIES,
         "tool_code": 7  
     },
     "Слайд 5.7. Отчет по доходности операций репо": {
-        "template": PROFITABILITY_REPORT,
+        "template": PROFITABILITY_REPORT_MAIN,
         "tool_code": 7  
     },
     "Слайд 5.8. Сводная форма доходности Финансовых инструментов": {
-        "template": PROFITABILITY_REPORT,
+        "template": PROFITABILITY_REPORT_SUMMARY,
         "tool_code": 7  
     },
 }

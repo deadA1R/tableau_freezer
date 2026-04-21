@@ -220,6 +220,20 @@ async def audit_user_context(data: UserContextDebugRequest, request: Request):
         "workflow_context_sync": workflow_context_sync,
     }
 
+@app.get("/summary-report/{snapshot_id}")
+async def get_summary_report(snapshot_id: str):
+    """
+    Возвращает строки сводной таблицы 5.8 по snapshot_id (task_id).
+    Каждая строка содержит ROW_INDEX и ROW_DATA — разобранный словарь.
+    """
+    rows = freezer.get_summary_report(snapshot_id)
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Данные для snapshot '{snapshot_id}' не найдены")
+    return {
+        "snapshot_id": snapshot_id,
+        "total_rows": len(rows),
+        "rows": rows,
+    }
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="localhost", port=8000, reload=True)

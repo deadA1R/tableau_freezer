@@ -1,3 +1,4 @@
+import io
 import sqlite3
 import uuid
 import json
@@ -5,37 +6,16 @@ import os
 import warnings
 from datetime import datetime
 from typing import Any
+from urllib.parse import unquote
+
+import urllib3
+import urllib3.exceptions
+
 from app.report_registry import REPORTS_SQL, REPORT_DEPENDENCIES
 from app.statuses import WorkflowStatus, RequestResultStatus
+from app.config import REPORTS_WITH_REPORT_DATE, REPORT_5_8_NAME, REPORT_5_8_WORKBOOK, REPORT_5_8_WORKSHEET, WORKFLOW_CONTEXT_COLUMNS, WORKFLOW_EXTENDED_COLUMNS
 
-
-WORKFLOW_CONTEXT_COLUMNS: dict[str, str] = {
-    "SESSION_ID": "TEXT",
-    "EVENT_ID": "TEXT",
-    "EVENT_TYPE": "TEXT",
-    "PUBLIC_IP_CANDIDATE": "TEXT",
-}
-
-WORKFLOW_EXTENDED_COLUMNS: dict[str, str] = {
-    "FREEZE_TASK_ID": "TEXT",
-    "SESSION_ID": "TEXT",
-    "EVENT_ID": "TEXT",
-    "EVENT_TYPE": "TEXT",
-    "TIMESTAMP_UTC": "TEXT",
-    "USER_AGENT": "TEXT",
-    "ACCEPT_LANGUAGE": "TEXT",
-    "SEC_CH_UA": "TEXT",
-    "SEC_CH_UA_PLATFORM": "TEXT",
-    "DEVICE_TYPE": "TEXT",
-    "TABLEAU_USER": "TEXT",
-    "DASHBOARD": "TEXT",
-    "PUBLIC_IP_CANDIDATE": "TEXT",
-}
-
-REPORTS_WITH_REPORT_DATE = {
-    "Слайд 5.5. Отчет по доходности ЦБ в тенге",
-    "Слайд 5.6. Отчет по доходности ЦБ в валюте",
-}
+import tableauserverclient as TSC
 
 def _resolve_period_dates(report_name: str, params: dict[str, Any]) -> tuple[str, str]:
     if report_name in REPORTS_WITH_REPORT_DATE:
@@ -102,7 +82,39 @@ def _resolve_required_freeze_task_id(data: dict[str, Any]) -> str:
 class TableauFreezer:
     def __init__(self):
         self.db_path = "workflow_freeze.db"
+        self._tableau_server_url = None
+        self._tableau_auth       = None
+        self._tableau_server     = None
         self._init_db()
+        try:
+            self._init_tableau_client()
+        except Exception as e:
+            print(f"⚠️  [Tableau] Ошибка инициализации клиента: {e}")
+
+    def _init_tableau_client(self):
+        """Инициализирует TSC-клиент из переменных окружения.
+        Не падает если credentials не заданы — просто оставляет None.
+        """
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+ 
+        self._tableau_server_url = os.getenv('TABLEAU_SERVER_URL')
+        token_name  = os.getenv('TABLEAU_TOKEN_NAME')
+        token_value = os.getenv('TABLEAU_TOKEN_VALUE')
+        site_id     = os.getenv('TABLEAU_SITENAME', '')
+ 
+        if all([self._tableau_server_url, token_name, token_value]):
+            self._tableau_auth = TSC.PersonalAccessTokenAuth(
+                token_name=token_name,
+                personal_access_token=token_value,
+                site_id=site_id,
+            )
+            self._tableau_server = TSC.Server(self._tableau_server_url, use_server_version=True)
+            self._tableau_server.add_http_options({'verify': False})
+            print("✅ [Tableau] Клиент инициализирован")
+        else:
+            self._tableau_auth   = None
+            self._tableau_server = None
+            print("⚠️  [Tableau] Credentials не заданы — выгрузка из Tableau недоступна")
 
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
@@ -127,7 +139,24 @@ class TableauFreezer:
             """)
             self._ensure_workflow_context_columns(conn)
             self._ensure_workflow_extended_table(conn)
+            self._ensure_frozen_summary_table(conn)
             conn.commit()
+
+    def _ensure_frozen_summary_table(self, conn: sqlite3.Connection) -> None:
+        """Создаёт таблицу для заморозки сводной формы 5.8."""
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS FROZEN_SUMMARY_REPORT_PROFITABILITY (
+                SNAPSHOT_ID   TEXT PRIMARY KEY,
+                INIT          TEXT,
+                APPROVER      TEXT,
+                FREEZING_PERIOD_START TEXT,
+                FREEZING_PERIOD_END   TEXT,
+                DATE_FREEZE   TEXT,
+                LOAD_DATE     TEXT,
+                DATA_JSON     TEXT   -- JSON одной строки; заменим на явные колонки после RDP
+            )
+        """
+        )
 
     def _ensure_workflow_context_columns(self, conn: sqlite3.Connection) -> None:
         existing_columns = {
@@ -514,42 +543,57 @@ class TableauFreezer:
             }
 
     def final_approve(self, task_id: str, current_user: str) -> dict[str, Any]:
+        # ── Шаг 1: проверки и обновление статуса (если что-то пойдёт не так — 400) ──
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
-                task = conn.execute("SELECT * FROM FREEZE_WORKFLOW WHERE TASK_ID = ?", (task_id,)).fetchone()
-                
+                task = conn.execute(
+                    "SELECT * FROM FREEZE_WORKFLOW WHERE TASK_ID = ?", (task_id,)
+                ).fetchone()
+
                 if not task:
                     return {"success": False, "message": "Задача не найдена"}
-                
-                db_name = task['REPORT_NAME'] 
-                
                 if task['APPROVER_USER'] != current_user:
                     return {"success": False, "message": f"Нужен аппрув от {task['APPROVER_USER']}"}
-                
                 if task['STATUS'] != WorkflowStatus.PENDING.value:
                     return {"success": False, "message": f"Статус: {task['STATUS']}"}
 
-                report_meta = REPORTS_SQL.get(db_name)
+                report_name = task['REPORT_NAME']
+                report_meta = REPORTS_SQL.get(report_name)
                 if not report_meta:
-                    return {"success": False, "message": f"Отчет '{db_name}' не найден в реестре"}
+                    return {"success": False, "message": f"Отчет '{report_name}' не найден в реестре"}
 
                 final_sql = self._build_vertica_sql(task, report_meta)
-                
+
                 # ВЫЗОВ ВЕРТИКИ
                 # self.vertica_client.execute(final_sql)
-                print(f"✅ Заморозка выполнена для {db_name}")
+                print(f"✅ Заморозка выполнена для {report_name}")
 
+                now_iso = datetime.now().isoformat()
                 conn.execute(
                     "UPDATE FREEZE_WORKFLOW SET STATUS = ?, DATE_APPROVE = ? WHERE TASK_ID = ?",
-                    (WorkflowStatus.APPROVED.value, datetime.now().isoformat(), task_id)
+                    (WorkflowStatus.APPROVED.value, now_iso, task_id),
                 )
                 conn.commit()
-                
-                return {"success": True}
+
+                # Сохраняем копию task как dict — соединение сейчас закроется
+                task_dict = dict(task)
+
         except Exception as e:
             print(f"КРИТИЧЕСКАЯ ОШИБКА В final_approve: {e}")
             return {"success": False, "message": str(e)}
+
+        # ── Шаг 2: выгрузка данных 5.8 из Tableau (ошибка НЕ ломает аппрув) ──
+        summary_result = None
+        if task_dict.get('REPORT_NAME') == REPORT_5_8_NAME:
+            print(f"[5.8] Начинаем выгрузку данных из Tableau...")
+            try:
+                summary_result = self._fetch_and_save_summary_report(task_dict, now_iso)
+            except Exception as e:
+                summary_result = {"saved": False, "reason": str(e)}
+            print(f"[5.8] Результат выгрузки: {summary_result}")
+
+        return {"success": True, "summary_saved": summary_result}
 
     def _build_vertica_sql(self, task: sqlite3.Row, base_sql: dict[str, Any]) -> str:
         import json
@@ -576,6 +620,102 @@ class TableauFreezer:
         final_query = sql_template.replace("{ToolCode}", str(tool_code)).replace("{DateStart}", date_start).replace("{DateEnd}", date_end).replace("{SnapshotID}",snapshot_id).replace("{IninUser}",init_user).replace("{ApproverUser}",approver_user)
         
         return final_query
+    
+    def _fetch_and_save_summary_report(self, task: sqlite3.Row, approve_ts: str) -> dict[str, Any]:
+        """
+        Забирает данные листа REPORT_5_8_WORKSHEET из Tableau Server через get_view_data
+        и сохраняет строки в FROZEN_SUMMARY_REPORT_PROFITABILITY.
+        Вызывается только при аппруве задачи отчёта 5.8.
+        """
+        if self._tableau_server is None:
+            return {"saved": False, "reason": "Tableau Server credentials not configured in .env"}
+ 
+        params = json.loads(task['PARAMS_JSON'])
+        d_start, d_end = _resolve_period_dates(task['REPORT_NAME'], params)
+ 
+        tableau_params = {
+            'Дата начала периода': d_start,
+            'Дата окончания периода': d_end,
+        }
+ 
+        target_path = f"{REPORT_5_8_WORKBOOK}/{REPORT_5_8_WORKSHEET}"
+        print(f"[5.8] Выгружаем: {target_path!r} | params={tableau_params}")
+ 
+        try:
+            df = self.get_view_data(target_path, tableau_params)
+            print(f"[5.8] Получено {len(df)} строк, {len(df.columns)} колонок")
+            print(f"[5.8] Колонки: {list(df.columns)}")
+        except Exception as e:
+            return {"saved": False, "reason": f"Ошибка выгрузки из Tableau: {e}"}
+ 
+        return self._save_df_to_summary_table(df, task, d_start, d_end, approve_ts)
+ 
+    def _save_df_to_summary_table(
+        self,
+        df: "pd.DataFrame",
+        task: sqlite3.Row,
+        d_start: str,
+        d_end: str,
+        approve_ts: str,
+    ) -> dict[str, Any]:
+        """Записывает DataFrame построчно в FROZEN_SUMMARY_REPORT_PROFITABILITY."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Перезапись — удаляем старый снапшот
+                conn.execute(
+                    "DELETE FROM FROZEN_SUMMARY_REPORT_PROFITABILITY WHERE SNAPSHOT_ID = ?",
+                    (task['TASK_ID'],),
+                )
+                for idx, row in df.iterrows():
+                    conn.execute(
+                        """
+                        INSERT INTO FROZEN_SUMMARY_REPORT_PROFITABILITY (
+                            SNAPSHOT_ID, INIT_USER, APPROVER_USER,
+                            FREEZING_PERIOD_START, FREEZING_PERIOD_END,
+                            DATE_FREEZE, LOAD_DATE,
+                            ROW_INDEX, ROW_DATA_JSON
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            task['TASK_ID'],
+                            task['INIT_USER'],
+                            task['APPROVER_USER'],
+                            d_start,
+                            d_end,
+                            approve_ts[:10],
+                            approve_ts,
+                            int(idx),
+                            row.to_json(force_ascii=False),
+                        ),
+                    )
+                conn.commit()
+ 
+            return {"saved": True, "rows_written": len(df), "snapshot_id": task['TASK_ID']}
+        except Exception as e:
+            print(f"Ошибка _save_df_to_summary_table: {e}")
+            return {"saved": False, "reason": str(e)}
+ 
+    def get_summary_report(self, snapshot_id: str) -> dict[str, Any] | None:
+        """Возвращает запись сводного отчёта 5.8 по snapshot_id.
+        DATA_JSON разбирается в словарь и добавляется как 'data'.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT * FROM FROZEN_SUMMARY_REPORT_PROFITABILITY
+                WHERE SNAPSHOT_ID = ?
+                """,
+                (snapshot_id,),
+            ).fetchone()
+            if not row:
+                return None
+            entry = dict(row)
+            try:
+                entry['data'] = json.loads(entry['DATA_JSON'])
+            except Exception:
+                entry['data'] = None
+            return entry
 
     def get_user_tasks(self, username: str) -> list[dict[str, Any]]:
         with sqlite3.connect(self.db_path) as conn:
@@ -627,3 +767,115 @@ class TableauFreezer:
                 return {"success": True}
         except Exception as e:
             return {"success": False, "message": str(e)}
+        
+    
+    def get_view_data(self, workbook_name_or_path: str, parameters: dict = None):
+        """
+        Универсальная выгрузка данных из Tableau Server.
+ 
+        workbook_name_or_path — имя воркбука ИЛИ путь вида "workbook/sheet".
+        Если содержит "/", разбивается на workbook-часть и sheet-часть.
+        Возвращает pd.DataFrame.
+        """
+        import pandas as pd
+        import requests
+ 
+        if self._tableau_server is None or self._tableau_auth is None:
+            raise RuntimeError("Tableau credentials не заданы в .env")
+ 
+        with self._tableau_server.auth.sign_in(self._tableau_auth):
+            print(f"[Tableau] Ищу: {repr(workbook_name_or_path)}")
+ 
+            target_sheet_name = None
+            search_name = workbook_name_or_path
+ 
+            # Разбиваем путь "workbook/sheet" если есть "/"
+            if "/" in workbook_name_or_path:
+                parts = unquote(workbook_name_or_path).replace("views/", "").split("/")
+                search_name       = parts[0]
+                target_sheet_name = parts[-1].split("?")[0]
+                print(f"[Tableau]   Воркбук: {repr(search_name)}")
+                print(f"[Tableau]   Лист:    {repr(target_sheet_name)}")
+ 
+            # Поиск по Name
+            req_options = TSC.RequestOptions()
+            req_options.filter.add(TSC.Filter(
+                TSC.RequestOptions.Field.Name,
+                TSC.RequestOptions.Operator.Equals,
+                search_name,
+            ))
+            workbooks, _ = self._tableau_server.workbooks.get(req_options)
+ 
+            # Фоллбэк — поиск по ContentUrl
+            if not workbooks:
+                print(f"[Tableau]   По Name не найден, пробую ContentUrl...")
+                req_options2 = TSC.RequestOptions()
+                req_options2.filter.add(TSC.Filter(
+                    TSC.RequestOptions.Field.ContentUrl,
+                    TSC.RequestOptions.Operator.Equals,
+                    search_name,
+                ))
+                workbooks, _ = self._tableau_server.workbooks.get(req_options2)
+ 
+            if not workbooks:
+                # Для диагностики — печатаем все воркбуки
+                all_wbs, _ = self._tableau_server.workbooks.get()
+                names = [w.name for w in all_wbs]
+                print(f"[Tableau]   Все воркбуки ({len(names)}): {names}")
+                raise ValueError(f"Воркбук '{search_name}' не найден на Tableau Server")
+ 
+            wb = workbooks[0]
+            print(f"[Tableau]   Найден воркбук: {repr(wb.name)} (id={wb.id})")
+            self._tableau_server.workbooks.populate_views(wb)
+ 
+            # Все листы воркбука
+            print(f"[Tableau]   Листы ({len(wb.views)}):")
+            for v in wb.views:
+                print(f"[Tableau]     name={repr(v.name)}  content_url={repr(v.content_url)}")
+ 
+            # Ищем нужный лист
+            view_id = None
+            if target_sheet_name:
+                view = next(
+                    (v for v in wb.views
+                     if target_sheet_name in (v.content_url or "")
+                     or target_sheet_name == v.name),
+                    None,
+                )
+                if view:
+                    view_id = view.id
+                    print(f"[Tableau]   Используем лист: {repr(view.name)}")
+                else:
+                    print(f"[Tableau]   ⚠️  Лист {repr(target_sheet_name)} не найден — берём первый")
+ 
+            # Фоллбэк на первый лист
+            if not view_id and wb.views:
+                view_id = wb.views[0].id
+                print(f"[Tableau]   Первый лист: {repr(wb.views[0].name)}")
+ 
+            # REST API запрос данных
+            endpoint = (
+                f"{self._tableau_server_url}/api/{self._tableau_server.version}"
+                f"/sites/{self._tableau_server.site_id}/views/{view_id}/data"
+            )
+            headers = {'X-Tableau-Auth': self._tableau_server.auth_token}
+ 
+            print(f"[Tableau]   GET {endpoint}")
+            print(f"[Tableau]   Params: {parameters}")
+ 
+            resp = requests.get(
+                endpoint,
+                headers=headers,
+                params=parameters,
+                verify=False,
+                timeout=60,
+            )
+ 
+            if resp.status_code != 200:
+                raise Exception(
+                    f"Ошибка выгрузки ({resp.status_code}): {resp.text[:300]}"
+                )
+ 
+            df = pd.read_csv(io.BytesIO(resp.content))
+            print(f"[Tableau]   ✅ Получено {len(df)} строк, {len(df.columns)} колонок")
+            return df
