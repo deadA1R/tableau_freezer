@@ -3,24 +3,115 @@
 <head>
     <meta charset="utf-8">
     <title>Подтверждение данных в Tableau</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/gh/tableau/extensions-api@master/lib/tableau.extensions.1.latest.js"></script>
-    <style>
-        body { margin: 0; padding: 10px; font-family: 'Segoe UI', sans-serif; background: #fff; overflow: hidden; }
-        .container { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-        .btn { 
-            background: #007A41; color: white; border: none; padding: 14px; 
-            width: 100%; border-radius: 6px; cursor: pointer; font-weight: bold;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; font-size: 14px;
+<style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --g1: #2D6B42;
+            --g2: #4A8C58;
+            --g5: #C8E0D8;
+            --g4: #A8D4C2;
+            --au1: #B8A055;
+            --ink: #1A1A1A;
+            --ink-3: #7A7A7A;
+            --sf2: #F7F9F7;
+            --bd: #D8E2DA;
+            --font: 'Inter', system-ui, sans-serif;
+            --mono: 'JetBrains Mono', monospace;
         }
-        .btn:hover { background: #2CA25F; }
-        .btn:disabled { background: #abbbc6; }
-        #status { font-size: 12px; text-align: center; color: #555; }
+        html, body {
+            height: 100%;
+            overflow: hidden;
+            font-family: var(--font);
+            background: var(--sf2);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .wrap {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: stretch;
+            padding: 12px;
+            gap: 9px;
+        }
+
+        /* Username block */
+        #user-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #fff;
+            border: 1px solid var(--bd);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 13px;
+            color: var(--ink);
+            font-weight: 500;
+        }
+        #user-info::before {
+            content: '';
+            display: block;
+            width: 26px; height: 26px;
+            border-radius: 50%;
+            background: var(--g5);
+            border: 1.5px solid var(--g4);
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='8' r='4' stroke='%232D6B42' stroke-width='1.8'/%3E%3Cpath stroke='%232D6B42' stroke-width='1.8' stroke-linecap='round' d='M4 20c0-4 3.6-7 8-7s8 3 8 7'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: center;
+            flex-shrink: 0;
+        }
+
+        /* Main button */
+        #freezeBtn {
+            background: var(--g1);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 13px 16px;
+            font-family: var(--font);
+            font-size: 13.5px;
+            font-weight: 700;
+            letter-spacing: .3px;
+            cursor: pointer;
+            width: 100%;
+            transition: background .18s, transform .1s;
+            position: relative;
+            overflow: hidden;
+        }
+        #freezeBtn::before {
+            content: '';
+            position: absolute; inset: 0;
+            background: linear-gradient(180deg, rgba(255,255,255,.09) 0%, transparent 55%);
+            pointer-events: none;
+        }
+        #freezeBtn:hover:not(:disabled) { background: var(--g2); }
+        #freezeBtn:active:not(:disabled) { transform: scale(.985); }
+        #freezeBtn:disabled {
+            background: #E8EDE9;
+            color: #A0AEA2;
+            cursor: not-allowed;
+        }
+        #freezeBtn:disabled::before { display: none; }
+
+        /* Status — минимальный, просто подсказка снизу */
+        #status {
+            text-align: center;
+            font-family: var(--mono);
+            font-size: 10px;
+            color: var(--ink-3);
+            letter-spacing: .3px;
+            min-height: 14px;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div id="user-info" style="font-size: 11px; color: #888;">Определение пользователя...</div>
-        <button id="freezeBtn" class="btn" disabled>ПОДГОТОВИТЬ СРЕЗ</button>
+    <div class="wrap">
+        <div id="user-info">Определение пользователя...</div>
+        <button id="freezeBtn" disabled>Подготовить отчет</button>
         <div id="status">Инициализация...</div>
     </div>
 
@@ -45,7 +136,7 @@
         
         const tableauUser = tableau.extensions.environment.username || "tabladmin";
         userBadge.innerText = `Пользователь: ${tableauUser}`;
- 
+
         btn.disabled = false;
         status.innerText = "Готов к работе";
 

@@ -140,6 +140,198 @@ BASE_DETAILED_REPORT = """SELECT * FROM (
             AND final_data."DM_DATE" <= '{DateEnd}'::DATE"""
 
 
+PROFITABILITY_REPORT_MAIN = """
+    SELECT 
+        '{SnapshotID}' as "SNAPSHOT_ID",
+        '{IninUser}' as "INIT",
+        '{ApproverUser}' as "APPROVER",
+        '{DateStart}' AS "FREEZING_PERIOD_START",
+        '{DateEnd}' AS "FREEZING_PERIOD_END",
+        CURRENT_DATE as "DATE_FREEZE",
+        GETDATE() AS "LOAD_DATE",
+        "dm_limit_contract"."AMOUNT_CLOSE", 
+        "dm_limit_contract"."BALANCE_AMOUNT_LCY", 
+        "dm_limit_contract"."BANK_NAME",
+        "dm_limit_contract"."CURRENCY_CODE",
+        "dm_limit_contract"."DATE_END",
+        "dm_limit_contract"."DATE_START",
+        "dm_limit_contract"."DM_DATE",
+        "dm_limit_contract"."GUAR_PROJ_NAME",
+        "dm_limit_contract"."INTEREST_PERIOD",
+        "dm_limit_contract"."INTEREST_RATE" ,
+        "dm_limit_contract"."LIMIT_DEAL_ID" ,
+        "dm_limit_contract"."LIMIT_TOOL_CODE" ,
+        "dm_limit_contract"."LIMIT_TOOL_NAME" ,
+        "dm_limit_contract"."NOT_INCLUDED_TO_INCOME" ,
+        "dm_limit_contract"."ORGANIZATION_NAME_LEGAL" ,
+        "dm_limit_contract"."ORGANIZATION_NAME_SHORT" 
+    FROM "DM"."DM_LIMIT_CONTRACT" "dm_limit_contract"
+        WHERE 
+            "dm_limit_contract"."CURRENCY_CODE" = 'KZT' 
+            AND "dm_limit_contract"."LIMIT_TOOL_CODE" = '{ToolCode}'
+            AND "dm_limit_contract"."DM_DATE" >= '{DateStart}'
+            AND "dm_limit_contract"."DM_DATE" <= '{DateEnd}'
+"""
+
+PROFITABILITY_REPORT_MAIN_CURRENCY = """
+SELECT * FROM (
+    SELECT 
+        '{SnapshotID}' as "SNAPSHOT_ID",
+        '{IninUser}' as "INIT",
+        '{ApproverUser}' as "APPROVER",
+        '{DateStart}' AS "FREEZING_PERIOD_START",
+        '{DateEnd}' AS "FREEZING_PERIOD_END",
+        CURRENT_DATE as "DATE_FREEZE",
+        GETDATE() AS "LOAD_DATE",
+        "dm_limit_contract"."BALANCE_AMOUNT_FCY",
+        "dm_limit_contract"."BALANCE_AMOUNT_LCY",
+        "dm_limit_contract"."BANK_NAME",
+        "dm_limit_contract"."CURRENCY_CODE",
+        "dm_limit_contract"."DM_DATE",
+        "dm_limit_contract"."INTEREST_PERIOD",
+        "dm_limit_contract"."INTEREST_RATE",
+        "dm_limit_contract"."LIMIT_DEAL_ID",
+        "dm_limit_contract"."LIMIT_TOOL_CODE",
+        "dm_limit_contract"."NOT_INCLUDED_TO_INCOME",
+        "dm_limit_contract"."ORGANIZATION_NAME_LEGAL",
+        "dm_limit_contract"."ORGANIZATION_NAME_SHORT",
+        "di_exchange_rates_suko"."VALUE",
+        "t0"."value" AS "VALUE (DI_EXCHANGE_RATES_SUKO1)"
+    FROM "DM"."DM_LIMIT_CONTRACT" "dm_limit_contract"
+    LEFT JOIN 
+        "DWH"."DI_EXCHANGE_RATES_SUKO" "di_exchange_rates_suko" 
+        ON 
+            (("dm_limit_contract"."CURRENCY_CODE" = "di_exchange_rates_suko"."CURRENCY_CODE") 
+            AND ("dm_limit_contract"."DM_DATE" = "di_exchange_rates_suko"."EX_DATE"))
+    LEFT JOIN (
+        SELECT 
+            "di_exchange_rates_suko1"."LOAD_DATE" AS "load_date",
+            "di_exchange_rates_suko1"."CURRENCY_CODE" AS "currency_code",
+            "di_exchange_rates_suko1"."VALUE" AS "value",
+            "di_exchange_rates_suko1"."EX_DATE" AS "ex_date",
+            TIMESTAMPADD(DAY, CAST(1 AS INT), "di_exchange_rates_suko1"."EX_DATE") AS "_temp0"
+        FROM 
+            "DWH"."DI_EXCHANGE_RATES_SUKO" "di_exchange_rates_suko1"
+        ) "t0" 
+        ON 
+            (("dm_limit_contract"."CURRENCY_CODE" = "t0"."currency_code") 
+            AND ("dm_limit_contract"."DM_DATE" = "t0"."_temp0"))
+) final_query
+WHERE final_query."LIMIT_TOOL_CODE" = '{ToolCode}'
+            AND final_query."DM_DATE" >= '{DateStart}'
+            AND final_query."DM_DATE" <= '{DateEnd}'
+            AND final_query."CURRENCY_CODE" IS NOT NULL 
+            AND final_query."CURRENCY_CODE" <> 'KZT'
+"""
+
+PROFITABILITY_REPORT_SECURITIES = """
+SELECT distinct 
+    '{SnapshotID}' as "SNAPSHOT_ID",
+    '{IninUser}' as "INIT",
+    '{ApproverUser}' as "APPROVER",
+    '{DateStart}' AS "FREEZING_PERIOD_START",
+    '{DateEnd}' AS "FREEZING_PERIOD_END",
+    CURRENT_DATE as "DATE_FREEZE",
+    GETDATE() AS "LOAD_DATE",
+    "dm_income_security"."COUNTERPARTY_NAME_LEGAL",
+    "dm_income_security"."CPN_RATE",
+    "dm_income_security"."CURRENCY_CODE",
+    "dm_income_security"."DAYS_COUNT",
+    "dm_income_security"."DM_DATE",
+    "dm_income_security"."END_DATE",
+    "dm_income_security"."END_SUM_FCY",
+    "dm_income_security"."END_SUM_LCY",
+    "dm_income_security"."H_LEGAL_ENTITY_ID",
+    "dm_income_security"."H_ORGANIZATION_ID",
+    "dm_income_security"."INCOME_FCY",
+    "dm_income_security"."INCOME_LCY",
+    "dm_income_security"."INCOME_SUM_FCY",
+    "dm_income_security"."INCOME_SUM_LCY",
+    "dm_income_security"."INTEREST_PERIOD",
+    "dm_income_security"."LIMIT_DEAL_ID",
+    "dm_income_security"."LOT_ID",
+    "dm_income_security"."NUMBER",
+    "dm_income_security"."ORGANIZATION_NAME_LEGAL",
+    "dm_income_security"."ORGANIZATION_NAME_SHORT",
+    "dm_income_security"."START_DATE",
+    "dm_income_security"."START_SUM_FCY",
+    "dm_income_security"."START_SUM_LCY"
+FROM "DM"."DM_INCOME_SECURITY" "dm_income_security"
+WHERE "dm_income_security"."DM_DATE" = '{DateEnd}'
+"""
+
+PROFITABILITY_REPORT_SUMMARY = """
+    SELECT * FROM
+    (SELECT 
+        "dm_limit_contract"."AMOUNT_CLOSE",
+        "dm_limit_contract"."BALANCE_AMOUNT_FCY",
+        "dm_limit_contract"."BALANCE_AMOUNT_LCY",
+        "dm_limit_contract"."BANK_NAME",
+        "dm_limit_contract"."CURRENCY_CODE",
+        "dm_limit_contract"."DATE_END",
+        "dm_limit_contract"."DATE_START",
+        "dm_limit_contract"."DM_DATE",
+        "dm_limit_contract"."INTEREST_PERIOD",
+        "dm_limit_contract"."INTEREST_RATE",
+        "dm_limit_contract"."LIMIT_DEAL_ID",
+        "dm_limit_contract"."LIMIT_TOOL_CODE",
+        "dm_limit_contract"."LIMIT_TOOL_NAME",
+        "dm_limit_contract"."NOT_INCLUDED_TO_INCOME",
+        "dm_limit_contract"."ORGANIZATION_NAME_LEGAL",
+        "dm_limit_contract"."ORGANIZATION_NAME_SHORT",
+        "dm_limit_contract"."PARENT_ORGANIZATION_NAME_SHORT",
+        "dm_income_security"."START_DATE", 
+        "dm_income_security"."CURRENCY_CODE" as "CURRENCY_CODE (DM_INCOME_SECURITY)", 
+        "dm_income_security"."START_SUM_FCY", 
+        "dm_income_security"."START_SUM_LCY", 
+        "dm_income_security"."INCOME_FCY",  
+        "dm_income_security"."INCOME_LCY", 
+        "dm_income_security"."INCOME_SUM_FCY", 
+        "dm_income_security"."INCOME_SUM_LCY", 
+        "t0"."value" AS "VALUE (DI_EXCHANGE_RATES_SUKO1)",
+        "di_exchange_rates_suko"."VALUE"
+    FROM 
+        "DM"."DM_LIMIT_CONTRACT" "dm_limit_contract"
+    LEFT JOIN 
+        "DM"."DM_INCOME_SECURITY" "dm_income_security" 
+        ON 
+        (("dm_limit_contract"."LIMIT_DEAL_ID" = "dm_income_security"."LIMIT_DEAL_ID") 
+        AND ("dm_limit_contract"."DM_DATE" = "dm_income_security"."DM_DATE"))
+    LEFT JOIN 
+        "DWH"."DI_EXCHANGE_RATES_SUKO" "di_exchange_rates_suko" 
+        ON 
+        (("dm_limit_contract"."CURRENCY_CODE" = "di_exchange_rates_suko"."CURRENCY_CODE") 
+        AND ("dm_limit_contract"."DM_DATE" = "di_exchange_rates_suko"."EX_DATE"))
+    LEFT JOIN (
+        SELECT 
+            "di_exchange_rates_suko1"."LOAD_DATE" AS "load_date",
+            "di_exchange_rates_suko1"."CURRENCY_CODE" AS "currency_code",
+            "di_exchange_rates_suko1"."VALUE" AS "value",
+            "di_exchange_rates_suko1"."EX_DATE" AS "ex_date",
+            TIMESTAMPADD(DAY, CAST(1 AS INT), "di_exchange_rates_suko1"."EX_DATE") AS "_temp0"
+        FROM 
+            "DWH"."DI_EXCHANGE_RATES_SUKO" "di_exchange_rates_suko1"
+        ) "t0" 
+        ON 
+            (("dm_limit_contract"."CURRENCY_CODE" = "t0"."currency_code") 
+            AND ("dm_limit_contract"."DM_DATE" = "t0"."_temp0"))
+    ) final_query
+    WHERE final_data."DM_DATE" >= '{DateStart}'
+    AND final_data."DM_DATE" <= '{DateEnd}'
+"""
+
+REPORT_DEPENDENCIES: dict[str, list[str]] = {
+    "Слайд 5.8. Сводная форма доходности Финансовых инструментов": [
+        "Слайд 5.1. Отчет по доходности депозитов в тенге",
+        "Слайд 5.2. Отчет по доходности депозитов в валюте",
+        "Слайд 5.3. Отчет по доходности текущих счетов в тенге",
+        "Слайд 5.4. Отчет по доходности текущих счетов в валюте",
+        "Слайд 5.5. Отчет по доходности ЦБ в тенге",
+        "Слайд 5.6. Отчет по доходности ЦБ в валюте",
+        "Слайд 5.7. Отчет по доходности операций репо",
+    ],
+}
+
 REPORTS_SQL = {
     "Слайд 1. Отчет по операциям репо (1.1)": {
         "template": BASE_DETAILED_REPORT,
@@ -172,6 +364,38 @@ REPORTS_SQL = {
     "Слайд 9. Отчет об иных требованиях к БВУ в разрезе источников финансирования (1.8)": {
         "template": BASE_DETAILED_REPORT,
         "tool_code": 7  
-    }
+    },
+    "Слайд 5.1. Отчет по доходности депозитов в тенге": {
+        "template": PROFITABILITY_REPORT_MAIN,
+        "tool_code": 2  
+    },
+    "Слайд 5.2. Отчет по доходности депозитов в валюте": {
+        "template": PROFITABILITY_REPORT_MAIN_CURRENCY,
+        "tool_code": 2  
+    },
+    "Слайд 5.3. Отчет по доходности текущих счетов в тенге": {
+        "template": PROFITABILITY_REPORT_MAIN,
+        "tool_code": 1  
+    },
+    "Слайд 5.4. Отчет по доходности текущих счетов в валюте": {
+        "template": PROFITABILITY_REPORT_MAIN_CURRENCY,
+        "tool_code": 1  
+    },
+    "Слайд 5.5. Отчет по доходности ЦБ в тенге": {
+        "template": PROFITABILITY_REPORT_SECURITIES,
+        "tool_code": 7  
+    },
+    "Слайд 5.6. Отчет по доходности ЦБ в валюте": {
+        "template": PROFITABILITY_REPORT_SECURITIES,
+        "tool_code": 7  
+    },
+    "Слайд 5.7. Отчет по доходности операций репо": {
+        "template": PROFITABILITY_REPORT_MAIN,
+        "tool_code": 4  
+    },
+    "Слайд 5.8. Сводная форма доходности Финансовых инструментов": {
+        "template": PROFITABILITY_REPORT_SUMMARY,
+        "tool_code": 7  
+    },
 }
  
