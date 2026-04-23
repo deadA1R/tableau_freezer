@@ -143,7 +143,7 @@ BASE_DETAILED_REPORT = """SELECT * FROM (
 PROFITABILITY_REPORT_MAIN = """
     SELECT 
         '{SnapshotID}' as "SNAPSHOT_ID",
-        '{IninUser}' as "INIT",
+        '{InitUser}' as "INIT",
         '{ApproverUser}' as "APPROVER",
         '{DateStart}' AS "FREEZING_PERIOD_START",
         '{DateEnd}' AS "FREEZING_PERIOD_END",
@@ -177,7 +177,7 @@ PROFITABILITY_REPORT_MAIN_CURRENCY = """
 SELECT * FROM (
     SELECT 
         '{SnapshotID}' as "SNAPSHOT_ID",
-        '{IninUser}' as "INIT",
+        '{InitUser}' as "INIT",
         '{ApproverUser}' as "APPROVER",
         '{DateStart}' AS "FREEZING_PERIOD_START",
         '{DateEnd}' AS "FREEZING_PERIOD_END",
@@ -227,7 +227,7 @@ WHERE final_query."LIMIT_TOOL_CODE" = '{ToolCode}'
 PROFITABILITY_REPORT_SECURITIES = """
 SELECT distinct 
     '{SnapshotID}' as "SNAPSHOT_ID",
-    '{IninUser}' as "INIT",
+    '{InitUser}' as "INIT",
     '{ApproverUser}' as "APPROVER",
     '{DateStart}' AS "FREEZING_PERIOD_START",
     '{DateEnd}' AS "FREEZING_PERIOD_END",
@@ -263,6 +263,13 @@ WHERE "dm_income_security"."DM_DATE" = '{DateEnd}'::DATE
 PROFITABILITY_REPORT_SUMMARY = """
     SELECT * FROM
     (SELECT 
+        '{SnapshotID}' as "SNAPSHOT_ID",
+        '{InitUser}' as "INIT",
+        '{ApproverUser}' as "APPROVER",
+        '{DateStart}' AS "FREEZING_PERIOD_START",
+        '{DateEnd}' AS "FREEZING_PERIOD_END",
+        CURRENT_DATE as "DATE_FREEZE",
+        GETDATE() AS "LOAD_DATE",
         "dm_limit_contract"."AMOUNT_CLOSE",
         "dm_limit_contract"."BALANCE_AMOUNT_FCY",
         "dm_limit_contract"."BALANCE_AMOUNT_LCY",
@@ -315,7 +322,7 @@ PROFITABILITY_REPORT_SUMMARY = """
         ON 
             (("dm_limit_contract"."CURRENCY_CODE" = "t0"."currency_code") 
             AND ("dm_limit_contract"."DM_DATE" = "t0"."_temp0"))
-    ) final_query
+    ) final_data
     WHERE final_data."DM_DATE" >= '{DateStart}'::DATE
     AND final_data."DM_DATE" <= '{DateEnd}'::DATE
 """
