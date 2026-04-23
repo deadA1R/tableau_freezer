@@ -169,8 +169,8 @@ PROFITABILITY_REPORT_MAIN = """
         WHERE 
             "dm_limit_contract"."CURRENCY_CODE" = 'KZT' 
             AND "dm_limit_contract"."LIMIT_TOOL_CODE" = '{ToolCode}'
-            AND "dm_limit_contract"."DM_DATE" >= '{DateStart}'
-            AND "dm_limit_contract"."DM_DATE" <= '{DateEnd}'
+            AND "dm_limit_contract"."DM_DATE" >= '{DateStart}::DATE'
+            AND "dm_limit_contract"."DM_DATE" <= '{DateEnd}::DATE'
 """
 
 PROFITABILITY_REPORT_MAIN_CURRENCY = """
@@ -218,8 +218,8 @@ SELECT * FROM (
             AND ("dm_limit_contract"."DM_DATE" = "t0"."_temp0"))
 ) final_query
 WHERE final_query."LIMIT_TOOL_CODE" = '{ToolCode}'
-            AND final_query."DM_DATE" >= '{DateStart}'
-            AND final_query."DM_DATE" <= '{DateEnd}'
+            AND final_query."DM_DATE" >= '{DateStart}'::DATE
+            AND final_query."DM_DATE" <= '{DateEnd}'::DATE
             AND final_query."CURRENCY_CODE" IS NOT NULL 
             AND final_query."CURRENCY_CODE" <> 'KZT'
 """
@@ -257,7 +257,7 @@ SELECT distinct
     "dm_income_security"."START_SUM_FCY",
     "dm_income_security"."START_SUM_LCY"
 FROM "DM"."DM_INCOME_SECURITY" "dm_income_security"
-WHERE "dm_income_security"."DM_DATE" = '{DateEnd}'
+WHERE "dm_income_security"."DM_DATE" = '{DateEnd}'::DATE
 """
 
 PROFITABILITY_REPORT_SUMMARY = """
@@ -316,8 +316,8 @@ PROFITABILITY_REPORT_SUMMARY = """
             (("dm_limit_contract"."CURRENCY_CODE" = "t0"."currency_code") 
             AND ("dm_limit_contract"."DM_DATE" = "t0"."_temp0"))
     ) final_query
-    WHERE final_data."DM_DATE" >= '{DateStart}'
-    AND final_data."DM_DATE" <= '{DateEnd}'
+    WHERE final_data."DM_DATE" >= '{DateStart}'::DATE
+    AND final_data."DM_DATE" <= '{DateEnd}'::DATE
 """
 
 REPORT_DEPENDENCIES: dict[str, list[str]] = {
