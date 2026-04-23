@@ -7,7 +7,30 @@
 Клонировать репозиторий.
 Создать и активировать окружение: python -m venv venv.
 Установить зависимости: pip install -r requirements.txt.
+Создать .env на основе .env.example.
 Запустить бэкенд: python main.py.
+
+Выбор БД через флаг
+
+Поддерживаются 2 backend-режима через переменную окружения FREEZER_DB_BACKEND:
+
+- vertica (боевой режим)
+- sqlite (локальный режим без Vertica)
+
+Пример для Vertica:
+
+FREEZER_DB_BACKEND=vertica
+VERTICA_HOST=...
+VERTICA_PORT=5433
+VERTICA_USER=...
+VERTICA_PASSWORD=...
+VERTICA_DB=...
+VERTICA_SCHEMA=DM
+
+Пример для локального запуска без Vertica:
+
+FREEZER_DB_BACKEND=sqlite
+FREEZER_SQLITE_PATH=workflow_freeze.db
 
 Логика:
 

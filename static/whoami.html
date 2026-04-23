@@ -3,39 +3,274 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Who Am I Debug</title>
+    <title>User Context Debug</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        body { margin: 12px; }
-        pre {
-            max-height: 70vh;
-            overflow: auto;
-            border: 1px solid #ccc;
-            padding: 8px;
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --g1:    #0b8043;
+            --g2:    #35a55f;
+            --g3:    #58bb7f;
+            --g4:    #a8dbc0;
+            --g5:    #d7ebdf;
+            --g6:    #edf6f1;
+            --gr1:   #BEC2BE;
+            --gr2:   #8E9290;
+            --ink:   #111813;
+            --ink-2: #374040;
+            --ink-3: #6B7B70;
+            --sf:    #FFFFFF;
+            --sf2:   #F5F8F5;
+            --sf3:   #EBF1EC;
+            --bd:    #D4DDD6;
+            --font:  'Inter', system-ui, sans-serif;
+            --mono:  'JetBrains Mono', monospace;
         }
+
+        html, body {
+            height: 100%;
+            font-family: var(--font);
+            background: #f6faf7;
+            color: var(--ink);
+            font-size: 13px;
+            line-height: 1.55;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ─── HEADER ─────────────────────────────────────────── */
+        .hdr {
+            background: linear-gradient(135deg, var(--g1) 0%, var(--g2) 100%);
+            padding: 16px 20px 14px;
+            position: relative;
+            overflow: hidden;
+        }
+        .hdr::before, .hdr::after {
+            content: '';
+            position: absolute;
+            border-radius: 50%;
+            pointer-events: none;
+        }
+        .hdr::before {
+            width: 180px; height: 180px;
+            right: -50px; top: -70px;
+            background: rgba(184,157,95,.22);
+        }
+        .hdr::after {
+            width: 80px; height: 80px;
+            right: 50px; top: 20px;
+            background: rgba(233,248,240,.28);
+        }
+
+        .hdr-label {
+            font-family: var(--mono);
+            font-size: 9px;
+            letter-spacing: 2.2px;
+            text-transform: uppercase;
+            color: var(--g4);
+            margin-bottom: 5px;
+            position: relative;
+        }
+        .hdr-title {
+            font-size: 14.5px;
+            font-weight: 600;
+            color: #fff;
+            line-height: 1.3;
+            letter-spacing: -.1px;
+            position: relative;
+        }
+        .hdr-desc {
+            font-size: 11.5px;
+            color: rgba(255,255,255,.6);
+            margin-top: 6px;
+            line-height: 1.5;
+            position: relative;
+        }
+
+        /* ─── TOOLBAR ────────────────────────────────────────── */
+        .toolbar {
+            background: var(--sf);
+            border-bottom: 1px solid var(--bd);
+            padding: 9px 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn-refresh {
+            background: var(--g1);
+            color: #fff;
+            border: none;
+            border-radius: 7px;
+            padding: 7px 15px;
+            font-family: var(--font);
+            font-size: 12.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background .15s, transform .1s;
+            letter-spacing: -.1px;
+        }
+        .btn-refresh:hover { background: var(--g2); }
+        .btn-refresh:active { transform: scale(.97); }
+
+        .status-dot {
+            display: inline-block;
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: var(--g3);
+            margin-right: 5px;
+            flex-shrink: 0;
+        }
+        #status {
+            font-size: 12.5px;
+            color: var(--ink-3);
+            display: flex;
+            align-items: center;
+        }
+
+        /* ─── LAYOUT ─────────────────────────────────────────── */
+        .main {
+            display: grid;
+            grid-template-columns: 240px 1fr;
+            height: calc(100vh - 112px);
+            overflow: hidden;
+        }
+
+        /* ─── SIDEBAR ────────────────────────────────────────── */
+        .sidebar {
+            background: var(--sf);
+            border-right: 1px solid var(--bd);
+            padding: 16px 14px;
+            overflow-y: auto;
+        }
+        .sidebar::-webkit-scrollbar { width: 3px; }
+        .sidebar::-webkit-scrollbar-thumb { background: var(--bd); border-radius: 3px; }
+
+        .section-title {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1.1px;
+            text-transform: uppercase;
+            color: var(--gr2);
+            margin-bottom: 10px;
+        }
+
+        .meta-card {
+            background: var(--sf2);
+            border: 1px solid var(--bd);
+            border-radius: 10px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+        }
+        .meta-card-label {
+            font-family: var(--mono);
+            font-size: 9px;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: var(--gr2);
+            margin-bottom: 4px;
+        }
+        .meta-card-value {
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--ink);
+            word-break: break-all;
+            line-height: 1.4;
+        }
+
+        /* ─── JSON PANEL ─────────────────────────────────────── */
+        .json-panel {
+            display: flex;
+            flex-direction: column;
+            padding: 14px 16px;
+            overflow: hidden;
+        }
+
+        .json-panel-title {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1.1px;
+            text-transform: uppercase;
+            color: var(--gr2);
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+
+        pre#result {
+            flex: 1;
+            background: var(--sf);
+            border: 1px solid var(--bd);
+            border-radius: 10px;
+            padding: 14px 16px;
+            font-family: var(--mono);
+            font-size: 12px;
+            font-weight: 400;
+            line-height: 1.7;
+            color: var(--ink);
+            overflow: auto;
+            white-space: pre;
+            margin: 0;
+        }
+        pre#result::-webkit-scrollbar { width: 3px; height: 3px; }
+        pre#result::-webkit-scrollbar-thumb { background: var(--bd); border-radius: 3px; }
     </style>
 </head>
 <body>
-<div>
-    <h1>Тестовый профиль клиента</h1>
-    <p>Страница отправляет серверу клиентские метаданные и показывает объединенный результат.</p>
 
-    <div>
-        <button id="refreshBtn">Обновить данные</button>
+<div class="hdr">
+    <div class="hdr-label">User Context Debug · Baiterek</div>
+    <div class="hdr-title">Тестовый профиль клиента</div>
+    <div class="hdr-desc">Страница отправляет серверу клиентские метаданные и возвращает объединённый audit-профиль для диагностики browser/network контекста.</div>
+</div>
+
+<div class="toolbar">
+    <button class="btn-refresh" id="refreshBtn">Обновить данные</button>
+    <div id="status"><span class="status-dot"></span>Готово к сбору.</div>
+</div>
+
+<div class="main">
+    <aside class="sidebar">
+        <div class="section-title">Сводка</div>
+
+        <div class="meta-card">
+            <div class="meta-card-label">Session ID</div>
+            <div class="meta-card-value" id="meta-session">—</div>
+        </div>
+        <div class="meta-card">
+            <div class="meta-card-label">Event ID</div>
+            <div class="meta-card-value" id="meta-event">—</div>
+        </div>
+        <div class="meta-card">
+            <div class="meta-card-label">Client IP</div>
+            <div class="meta-card-value" id="meta-ip">—</div>
+        </div>
+        <div class="meta-card">
+            <div class="meta-card-label">Public IP</div>
+            <div class="meta-card-value" id="meta-public-ip">—</div>
+        </div>
+        <div class="meta-card">
+            <div class="meta-card-label">Browser</div>
+            <div class="meta-card-value" id="meta-browser">—</div>
+        </div>
+        <div class="meta-card">
+            <div class="meta-card-label">Roundtrip</div>
+            <div class="meta-card-value" id="meta-rtt">—</div>
+        </div>
+    </aside>
+
+    <div class="json-panel">
+        <div class="json-panel-title">Raw JSON</div>
+        <pre id="result">{}</pre>
     </div>
-
-    <div id="status">Готово к сбору.</div>
-    <pre id="result">{}</pre>
 </div>
 
 <script>
     const SESSION_STORAGE_KEY = 'debug_user_context_session_id';
 
     function safeNavigatorField(path, fallback = null) {
-        try {
-            return path();
-        } catch (_err) {
-            return fallback;
-        }
+        try { return path(); } catch (_err) { return fallback; }
     }
 
     function getSessionId() {
@@ -57,105 +292,52 @@
 
     async function getUserAgentHints() {
         const uaData = safeNavigatorField(() => navigator.userAgentData, null);
-        if (!uaData) {
-            return null;
-        }
-
-        const basic = {
-            brands: uaData.brands,
-            mobile: uaData.mobile,
-            platform: uaData.platform,
-        };
-
-        if (!uaData.getHighEntropyValues) {
-            return basic;
-        }
-
+        if (!uaData) return null;
+        const basic = { brands: uaData.brands, mobile: uaData.mobile, platform: uaData.platform };
+        if (!uaData.getHighEntropyValues) return basic;
         try {
-            const high = await uaData.getHighEntropyValues([
-                'platformVersion',
-                'architecture',
-                'model',
-                'uaFullVersion',
-                'bitness',
-                'fullVersionList',
-            ]);
+            const high = await uaData.getHighEntropyValues(['platformVersion','architecture','model','uaFullVersion','bitness','fullVersionList']);
             return { ...basic, ...high };
-        } catch (_err) {
-            return basic;
-        }
+        } catch (_err) { return basic; }
     }
 
     async function getLanIpCandidates() {
         const RTCPeerConnectionCtor = window.RTCPeerConnection || window.webkitRTCPeerConnection;
-        if (!RTCPeerConnectionCtor) {
-            return [];
-        }
-
+        if (!RTCPeerConnectionCtor) return [];
         const ipv4Regex = /^(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
         const ipv6Regex = /^[0-9a-fA-F:]+$/;
-
         function extractIpFromCandidateLine(candidateLine) {
             const parts = (candidateLine || '').split(' ').map(x => x.trim()).filter(Boolean);
             for (const token of parts) {
-                if (ipv4Regex.test(token)) {
-                    return token;
-                }
-                if (token.includes(':') && ipv6Regex.test(token) && token.length >= 4 && token.length <= 45) {
-                    return token;
-                }
+                if (ipv4Regex.test(token)) return token;
+                if (token.includes(':') && ipv6Regex.test(token) && token.length >= 4 && token.length <= 45) return token;
             }
             return null;
         }
-
         return new Promise((resolve) => {
             const ips = new Set();
             const pc = new RTCPeerConnectionCtor({ iceServers: [] });
-
-            const timeoutId = setTimeout(() => {
-                try { pc.close(); } catch (_err) {}
-                resolve(Array.from(ips));
-            }, 1500);
-
+            const timeoutId = setTimeout(() => { try { pc.close(); } catch (_err) {} resolve(Array.from(ips)); }, 1500);
             pc.onicecandidate = (event) => {
-                if (!event || !event.candidate || !event.candidate.candidate) {
-                    return;
-                }
-                const candidate = event.candidate.candidate;
-                const ipCandidate = extractIpFromCandidateLine(candidate);
-                if (ipCandidate) {
-                    ips.add(ipCandidate);
-                }
+                if (!event || !event.candidate || !event.candidate.candidate) return;
+                const ipCandidate = extractIpFromCandidateLine(event.candidate.candidate);
+                if (ipCandidate) ips.add(ipCandidate);
             };
-
             pc.createDataChannel('debug');
             pc.createOffer()
                 .then(offer => pc.setLocalDescription(offer))
-                .catch(() => {
-                    clearTimeout(timeoutId);
-                    try { pc.close(); } catch (_err) {}
-                    resolve(Array.from(ips));
-                });
-
-            setTimeout(() => {
-                clearTimeout(timeoutId);
-                try { pc.close(); } catch (_err) {}
-                resolve(Array.from(ips));
-            }, 1800);
+                .catch(() => { clearTimeout(timeoutId); try { pc.close(); } catch (_err) {} resolve(Array.from(ips)); });
+            setTimeout(() => { clearTimeout(timeoutId); try { pc.close(); } catch (_err) {} resolve(Array.from(ips)); }, 1800);
         });
     }
 
     async function getPublicIpCandidate() {
         try {
             const response = await fetch('https://api64.ipify.org?format=json', { method: 'GET' });
-            if (!response.ok) {
-                return null;
-            }
+            if (!response.ok) return null;
             const data = await response.json();
             return data.ip || null;
-        } catch (_err) {
-            return null;
-        }
+        } catch (_err) { return null; }
     }
 
     async function buildClientContext() {
@@ -163,7 +345,6 @@
         const lanIpCandidates = await getLanIpCandidates();
         const publicIpCandidate = await getPublicIpCandidate();
         const connection = safeNavigatorField(() => navigator.connection, null);
-
         return {
             client_timestamp_utc: new Date().toISOString(),
             page_url: window.location.href,
@@ -174,18 +355,8 @@
             cookie_enabled: navigator.cookieEnabled,
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             timezone_offset_minutes: new Date().getTimezoneOffset(),
-            screen: {
-                width: window.screen.width,
-                height: window.screen.height,
-                avail_width: window.screen.availWidth,
-                avail_height: window.screen.availHeight,
-                color_depth: window.screen.colorDepth,
-                pixel_ratio: window.devicePixelRatio || 1
-            },
-            viewport: {
-                width: window.innerWidth,
-                height: window.innerHeight
-            },
+            screen: { width: window.screen.width, height: window.screen.height, avail_width: window.screen.availWidth, avail_height: window.screen.availHeight, color_depth: window.screen.colorDepth, pixel_ratio: window.devicePixelRatio || 1 },
+            viewport: { width: window.innerWidth, height: window.innerHeight },
             hardware_concurrency: safeNavigatorField(() => navigator.hardwareConcurrency),
             device_memory_gb: safeNavigatorField(() => navigator.deviceMemory),
             max_touch_points: safeNavigatorField(() => navigator.maxTouchPoints),
@@ -201,35 +372,55 @@
         };
     }
 
+    function parseBrowser(ua) {
+        const m = ua.match(/(Chrome|Firefox|Safari|Edg|OPR)\/(\d+)/);
+        if (!m) return ua.slice(0, 30);
+        const name = m[1] === 'Edg' ? 'Edge' : m[1] === 'OPR' ? 'Opera' : m[1];
+        return name + ' ' + m[2];
+    }
+
     async function loadContext() {
         const status = document.getElementById('status');
         const result = document.getElementById('result');
-        status.innerText = 'Собираем данные...';
+        status.innerHTML = 'Собираем данные...';
+
+        const sid = getSessionId();
+        const eid = getEventId();
+
+        document.getElementById('meta-session').textContent = sid;
+        document.getElementById('meta-event').textContent = eid;
 
         const payload = {
             user: 'debug_local_user',
             dashboard: 'debug_page',
-            session_id: getSessionId(),
-            event_id: getEventId(),
+            session_id: sid,
+            event_id: eid,
             event_type: 'manual_debug_probe',
             client_context: await buildClientContext()
         };
 
+        const t0 = Date.now();
+
         try {
             const response = await fetch('/audit/user-context', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-
+            const rtt = Date.now() - t0;
             const json = await response.json();
             result.textContent = JSON.stringify(json, null, 2);
-            status.innerText = 'Готово. Данные актуальны на текущий момент.';
+            status.innerHTML = '<span class="status-dot"></span>Готово. Профиль обновлён.';
+            document.getElementById('meta-ip').textContent = json.server_context?.client_ip || '—';
+            document.getElementById('meta-browser').textContent = parseBrowser(navigator.userAgent);
+            document.getElementById('meta-public-ip').textContent = payload.client_context.public_ip_candidate || '—';
+            document.getElementById('meta-rtt').textContent = rtt + ' ms';
         } catch (err) {
-            status.innerText = 'Ошибка запроса к серверу.';
+            const rtt = Date.now() - t0;
+            status.innerHTML = 'Ошибка запроса к серверу.';
             result.textContent = JSON.stringify({ error: String(err) }, null, 2);
+            document.getElementById('meta-browser').textContent = parseBrowser(navigator.userAgent);
+            document.getElementById('meta-rtt').textContent = rtt + ' ms';
         }
     }
 
