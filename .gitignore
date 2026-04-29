@@ -16,4 +16,9 @@ __pycache__/
 # Локальные сертификаты
 *.pem
 
+audit/
 
+# Coverage
+.coverage
+.coverage.*
+htmlcov/

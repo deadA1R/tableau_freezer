@@ -6,12 +6,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ConfigDict
 import uvicorn
+import json
+
 
 # Локальные модули
 from app.tableau_bd_logic import TableauFreezer
-from app.config import ADMINS
-from app.report_registry import REPORTS_SQL 
+from app.config import ADMINS, APPROVERS, TABLEAU_SERVER
+from app.report_registry import REPORTS_SQL  # <--- Cправочник SQL
 from app.statuses import RequestResultStatus
+from app.approvers_registry import get_approvers_for_user
 from app.audit_json_logger import persist_user_context_event
 from app.user_context import (
     UserContextDebugRequest,
@@ -65,6 +68,7 @@ class VoidRequest(BaseModel):
 def trigger_notification(to_user: str, msg: str):
     print(f"✈️ [NOTIF] Пользователю {to_user} отправлено: {msg}")
 
+
 def _build_user_context_payload(
     data: UserContextDebugRequest,
     request: Request,
@@ -80,8 +84,35 @@ def _build_user_context_payload(
         "dashboard": data.dashboard,
         "client_context": data.client_context,
     }
+    
+USER_MAP_FILE = Path("app/user_map.json")
+
+def load_user_map():
+    if USER_MAP_FILE.exists():
+        return json.loads(USER_MAP_FILE.read_text(encoding="utf-8"))
+    return {}
+
+def save_user_map(m):
+    USER_MAP_FILE.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")
+
 
 # --- ЭНДПОИНТЫ ---
+@app.get("/approvers-for-user")
+async def approvers_for_user(user: str = Query(...)):
+    return {"approvers": get_approvers_for_user(user)}
+
+@app.get("/whoami")
+async def whoami(uid: str = Query(...)):
+    user_map = load_user_map()
+    return {"username": user_map.get(uid)}
+
+
+@app.post("/whoami/register")
+async def register_user(uid: str = Query(...), name: str = Query(...)):
+    user_map = load_user_map()
+    user_map[uid] = name
+    save_user_map(user_map)
+    return {"ok": True, "total": len(user_map)}
 
 @app.get("/extension-manifest")
 async def get_manifest():
@@ -95,7 +126,7 @@ async def get_pending_tasks(user: str = Query(...)):
     return freezer.get_user_tasks(user)
 
 @app.post("/request-freeze")
-async def request_freeze(request_data: FreezeRequest, request:Request):
+async def request_freeze(request_data: FreezeRequest, request: Request):
     try:
         # Проверяем, есть ли такой отчет в справочнике
         if request_data.dashboard not in REPORTS_SQL:
@@ -113,8 +144,10 @@ async def request_freeze(request_data: FreezeRequest, request:Request):
             return res
 
         trigger_notification(res["approver"], f"Нужен аппрув для {request_data.dashboard}")
+        print(res)
         return res
     except HTTPException:
+        print('Отчет не добавлен в справочник!')
         raise
     except Exception as e:
         print(f"❌ Error: {e}")
@@ -140,21 +173,58 @@ async def check_admin(user: str = Query(...)):
     is_admin = user in ADMINS
     return {"is_admin": is_admin}
 
+@app.get("/check-approver")
+async def check_approvers(user: str = Query(...)):
+    is_approver = user in APPROVERS
+    return {"is_approver": is_approver}
+
 @app.get("/approved-tasks")
 async def get_approved_tasks(
     report_name: Optional[str] = None, 
     date_from: Optional[str] = None
-    ):
+):
     """Возвращает все подтвержденные задачи для админ-панели"""
     return freezer.get_approved_tasks(report_name, date_from)
 
+@app.get("/check-duplicate")
+async def check_duplicate(
+    report: str = Query(...),
+    period_start: str = Query(...),
+    period_end: str = Query(...),
+    user: str = Query(...),
+):
+    from app.organizations_registry import get_organization_for_user
+    
+    period_key = f"{period_start}_{period_end}"
+    do_report = get_organization_for_user(user)
+    
+    return freezer.check_duplicate(report, period_key, do_report)
+
+
 @app.post("/void-task/{task_id}")
 async def api_void_task(task_id: str, data: VoidRequest):
+    # Используем глобальный экземпляр
     admin_user = data.user
     comment = data.comment
+    
+    # Вызываем метод
     result = freezer.void_task(task_id, admin_user, comment)
     
-    return result
+    return result # вернет {"success": True/False, "message": "..."} 
+
+@app.get("/check-dependencies")
+async def check_dependencies(
+    report: str = Query(..., description="Название отчёта"),
+    period_start: str = Query(..., description="Дата начала периода, например 01.01.2025"),
+    period_end: str = Query(..., description="Дата окончания периода, например 31.01.2025"),
+    user: str = Query(..., description="Пользователь-инициатор"),
+):
+
+    from app.organizations_registry import get_organization_for_user
+    
+    period_key = f"{period_start}_{period_end}"
+    do_report = get_organization_for_user(user)
+    return freezer.check_dependencies(report, period_key, do_report)
 
 @app.get("/debug/user-context")
 async def debug_user_context(request: Request):
