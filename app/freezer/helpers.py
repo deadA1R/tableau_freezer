@@ -1,3 +1,4 @@
+# -*- coding: cp1251 -*-
 import uuid
 from datetime import datetime as dt
 from typing import Any
@@ -6,7 +7,6 @@ from app.config import FROZEN_TABLE_FALLBACK, REPORT_FROZEN_TABLE_MAP, REPORTS_W
 
 
 def _get_frozen_table(report_name: str) -> str:
-    """Возвращает имя таблицы заморозки для переданного отчета."""
     return REPORT_FROZEN_TABLE_MAP.get(report_name, FROZEN_TABLE_FALLBACK)
 
 

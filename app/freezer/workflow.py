@@ -1,3 +1,4 @@
+# -*- coding: cp1251 -*-
 import json
 import os
 import uuid
@@ -6,6 +7,7 @@ from typing import Any, TYPE_CHECKING
 
 from app.config import REPORT_5_8_NAME, REPORT_5_8_WORKBOOK, REPORT_5_8_WORKSHEET
 from app.report_registry import REPORT_DEPENDENCIES, REPORTS_SQL
+from app.organizations_registry import get_organization_for_user
 from app.statuses import RequestResultStatus, WorkflowStatus
 from app.freezer.helpers import (
     _extract_public_ip_candidate,
@@ -19,7 +21,7 @@ if TYPE_CHECKING:
 
 
 class FreezerWorkflowMixin:
-    def check_dependencies(self, report_name: str, period_key: str) -> dict[str, Any]:
+    def check_dependencies(self, report_name: str, period_key: str, do_report: str) -> dict[str, Any]:
         schema = os.getenv("VERTICA_SCHEMA", "DM")
         required = REPORT_DEPENDENCIES.get(report_name, [])
 
@@ -39,14 +41,15 @@ class FreezerWorkflowMixin:
             with conn.cursor() as cursor:
                 for dep in required:
                     row = cursor.execute(
-                        """
+                        f"""
                         SELECT TASK_ID FROM {schema}.FREEZE_WORKFLOW
-                        WHERE REPORT_NAME = ?
-                        AND PERIOD = ?
-                        AND STATUS = ?
+                        WHERE REPORT_NAME = %s
+                        AND PERIOD = %s
+                        AND STATUS = %s
+                        AND DO_REPORT = %s
                         LIMIT 1
                         """,
-                        (dep, period_key, WorkflowStatus.APPROVED.value),
+                        (dep, period_key, WorkflowStatus.APPROVED.value, do_report),
                     ).fetchone()
 
                     if row:
@@ -62,6 +65,41 @@ class FreezerWorkflowMixin:
             "missing": missing,
         }
 
+    def check_duplicate(self, report_name: str, period_key: str, do_report: str) -> dict[str, Any]:
+      schema = os.getenv("VERTICA_SCHEMA", "DM")
+      
+      with self._get_db_connection() as conn:
+          with conn.cursor("dict") as cursor:
+              cursor.execute(
+                  f"""
+                  SELECT TASK_ID, STATUS, INIT_USER, APPROVER_USER 
+                  FROM {schema}.FREEZE_WORKFLOW
+                  WHERE REPORT_NAME = %s
+                  AND PERIOD = %s
+                  AND DO_REPORT = %s
+                  AND STATUS IN (%s, %s)
+                  LIMIT 1
+                  """,
+                  (
+                      report_name, 
+                      period_key, 
+                      do_report,
+                      WorkflowStatus.PENDING.value, 
+                      WorkflowStatus.APPROVED.value,
+                  ),
+              )
+              existing = cursor.fetchone()
+              
+              if existing:
+                  return {
+                      "is_duplicate": True,
+                      "status": existing["STATUS"],
+                      "init_user": existing["INIT_USER"],
+                      "approver_user": existing["APPROVER_USER"],
+                  }
+              return {"is_duplicate": False}
+    
+    
     def create_request(self, data: dict[str, Any]) -> dict[str, Any]:
         schema = os.getenv("VERTICA_SCHEMA", "DM")
         try:
@@ -76,8 +114,9 @@ class FreezerWorkflowMixin:
             period_key = f"{d_s}_{d_e}"
             approver = data.get("approver", "tabladmin")
             initiator = data.get("user", "unknown")
+            do_report = get_organization_for_user(initiator)
 
-            dep_check = self.check_dependencies(report, period_key)
+            dep_check = self.check_dependencies(report, period_key, do_report)
             if dep_check["has_dependencies"] and not dep_check["all_approved"]:
                 return {
                     "success": False,
@@ -92,7 +131,7 @@ class FreezerWorkflowMixin:
             with self._get_db_connection() as conn:
                 with conn.cursor() as cursor:
                     cursor.execute(
-                        f"SELECT STATUS, APPROVER_USER FROM {schema}.FREEZE_WORKFLOW WHERE PERIOD = %s AND REPORT_NAME = %s AND INIT_USER = %s AND APPROVER_USER = %s AND STATUS IN (%s, %s)",
+                        f"SELECT STATUS, APPROVER_USER FROM {schema}.FREEZE_WORKFLOW WHERE PERIOD = %s AND REPORT_NAME = %s AND INIT_USER = %s AND APPROVER_USER = %s AND STATUS IN (%s, %s) AND DO_REPORT = %s",
                         (
                             period_key,
                             report,
@@ -100,6 +139,7 @@ class FreezerWorkflowMixin:
                             approver,
                             WorkflowStatus.PENDING.value,
                             WorkflowStatus.APPROVED.value,
+                            do_report,
                         ),
                     )
                     exists = cursor.fetchone()
@@ -127,14 +167,15 @@ class FreezerWorkflowMixin:
                     cursor.execute(
                         f"""
                         INSERT INTO {schema}.FREEZE_WORKFLOW (
-                            TASK_ID, REPORT_NAME, PERIOD, INIT_USER,
+                            TASK_ID, REPORT_NAME, PERIOD, DO_REPORT, INIT_USER,
                             APPROVER_USER, PARAMS_JSON, COMMENT, IS_ACTUAL, SESSION_ID, EVENT_ID, EVENT_TYPE, PUBLIC_IP_CANDIDATE, DATE_CREATE
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                         (
                             task_id,
                             report,
                             period_key,
+                            do_report,
                             initiator,
                             approver,
                             json.dumps(params),
@@ -295,7 +336,7 @@ class FreezerWorkflowMixin:
                             {final_sql}
                         """
                         )
-                        print(f"✅ Заморозка выполнена для {db_name}")
+                        print(f"? Заморозка выполнена для {db_name}")
 
                     cursor.execute(
                         f"UPDATE {schema}.FREEZE_WORKFLOW SET STATUS = %s, DATE_APPROVE = %s WHERE TASK_ID = %s",
@@ -325,6 +366,7 @@ class FreezerWorkflowMixin:
         tool_code = base_sql.get("tool_code")
         d_start_raw = params.get("Дата начала периода", "01.01.2025")
         d_end_raw = params.get("Дата окончания периода", "30.01.2025")
+        currency_filter = base_sql.get("currency_filter", "")
 
         try:
             date_start = dt.strptime(d_start_raw, "%d.%m.%Y").strftime("%Y-%m-%d")
@@ -336,6 +378,20 @@ class FreezerWorkflowMixin:
         snapshot_id = task["TASK_ID"]
         init_user = task["INIT_USER"]
         approver_user = task["APPROVER_USER"]
+        do_report = task["DO_REPORT"]
+        report_name = task["REPORT_NAME"]
+
+        is_securities_report = report_name in {
+            "Слайд 5.5. Отчет по доходности ЦБ в тенге",
+            "Слайд 5.6. Отчет по доходности ЦБ в валюте",
+        }
+        
+        if is_securities_report and do_report == "АКК":
+            do_report_filter = "'АКК','КАФ'"
+        elif is_securities_report and do_report == "БРК":
+            do_report_filter = "'БРК','ФРП'"
+        else:
+            do_report_filter = f"'{do_report}'"
 
         final_query = (
             sql_template.replace("{ToolCode}", str(tool_code))
@@ -344,6 +400,9 @@ class FreezerWorkflowMixin:
             .replace("{SnapshotID}", snapshot_id)
             .replace("{InitUser}", init_user)
             .replace("{ApproverUser}", approver_user)
+            .replace("{CurrencyFilter}", currency_filter)
+            .replace("{DoReport}", do_report)
+            .replace("{DoReportFilter}", do_report_filter)
         )
 
         return final_query
@@ -393,6 +452,7 @@ class FreezerWorkflowMixin:
                     rows_to_insert = [
                         (
                             task["TASK_ID"],
+                            task["DO_REPORT"],
                             task["INIT_USER"],
                             task["APPROVER_USER"],
                             d_start,
@@ -408,11 +468,11 @@ class FreezerWorkflowMixin:
                     cursor.executemany(
                         f"""
                         INSERT INTO {schema}.FROZEN_SUMMARY_REPORT_PROFITABILITY (
-                            SNAPSHOT_ID, INIT_USER, APPROVER_USER,
+                            SNAPSHOT_ID, DO_REPORT, INIT_USER, APPROVER_USER,
                             FREEZING_PERIOD_START, FREEZING_PERIOD_END,
                             DATE_FREEZE, LOAD_DATE,
                             NAME_INDICATOR, VALUE_INDICATOR
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         rows_to_insert,
                     )

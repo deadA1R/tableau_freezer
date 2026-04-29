@@ -1,10 +1,18 @@
+# -*- coding: cp1251 -*-
 ADMINS = [
     'tabladmin', 
-    'drp_exp'
+    'drp_exp',
+    'a.assetov'
 ]
 
+APPROVERS = [
+    't.beguliyev.qic'
+]
+
+TABLEAU_SERVER = "https://bdata.baiterek.gov.kz"
+
 REPORT_5_8_NAME      = "Слайд 5.8. Сводная форма доходности Финансовых инструментов"
-REPORT_5_8_WORKBOOK  = "Отчеты по доходности"
+REPORT_5_8_WORKBOOK  = "Отчеты по доходности (ТЕСТ)"
 REPORT_5_8_WORKSHEET = "Слайд 5.8. Сводная форма доходности Финансовых инструментов"
 
 REPORTS_WITH_REPORT_DATE = {

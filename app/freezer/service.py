@@ -1,3 +1,4 @@
+# -*- coding: cp1251 -*-
 from dotenv import load_dotenv
 
 from app.freezer.db_schema import FreezerSchemaMixin
@@ -16,4 +17,4 @@ class TableauFreezer(FreezerSchemaMixin, FreezerWorkflowMixin, FreezerTableauMix
         try:
             self._init_tableau_client()
         except Exception as e:
-            print(f"⚠️  [Tableau] Ошибка инициализации клиента: {e}")
+            print(f"??  [Tableau] Ошибка инициализации клиента: {e}")

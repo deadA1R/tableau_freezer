@@ -1,3 +1,4 @@
+# -*- coding: cp1251 -*-
 import io
 import os
 from urllib.parse import unquote
@@ -9,7 +10,6 @@ import urllib3.exceptions
 
 class FreezerTableauMixin:
     def _init_tableau_client(self):
-        """Инициализирует TSC-клиент из переменных окружения."""
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         self._tableau_server_url = os.getenv("TABLEAU_SERVER_URL")
@@ -25,20 +25,13 @@ class FreezerTableauMixin:
             )
             self._tableau_server = TSC.Server(self._tableau_server_url, use_server_version=True)
             self._tableau_server.add_http_options({"verify": False})
-            print("✅ [Tableau] Клиент инициализирован")
+            print("? [Tableau] Клиент инициализирован")
         else:
             self._tableau_auth = None
             self._tableau_server = None
-            print("⚠️  [Tableau] Credentials не заданы — выгрузка из Tableau недоступна")
+            print("??  [Tableau] Credentials не заданы — выгрузка из Tableau недоступна")
 
     def get_view_data(self, workbook_name_or_path: str, parameters: dict = None):
-        """
-        Универсальная выгрузка данных из Tableau Server.
-
-        workbook_name_or_path — имя воркбука ИЛИ путь вида "workbook/sheet".
-        Если содержит "/", разбивается на workbook-часть и sheet-часть.
-        Возвращает pd.DataFrame.
-        """
         import pandas as pd
         import requests
 
@@ -108,7 +101,7 @@ class FreezerTableauMixin:
                     view_id = view.id
                     print(f"[Tableau]   Используем лист: {repr(view.name)}")
                 else:
-                    print(f"[Tableau]   ⚠️  Лист {repr(target_sheet_name)} не найден — берем первый")
+                    print(f"[Tableau]   ??  Лист {repr(target_sheet_name)} не найден — берем первый")
 
             if not view_id and wb.views:
                 view_id = wb.views[0].id
@@ -135,5 +128,5 @@ class FreezerTableauMixin:
                 raise Exception(f"Ошибка выгрузки ({resp.status_code}): {resp.text[:300]}")
 
             df = pd.read_csv(io.BytesIO(resp.content))
-            print(f"[Tableau]   ✅ Получено {len(df)} строк, {len(df.columns)} колонок")
+            print(f"[Tableau]   ? Получено {len(df)} строк, {len(df.columns)} колонок")
             return df

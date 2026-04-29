@@ -1,6 +1,7 @@
 BASE_DETAILED_REPORT = """SELECT * FROM (
                   SELECT   
                         '{SnapshotID}'::VARCHAR(100) as "SNAPSHOT_ID",
+                        '{DoReport}' as "DO_REPORT",
                         '{InitUser}'::VARCHAR(100) as "INIT",
                         '{ApproverUser}'::VARCHAR(100) as "APPROVER",
                         '{DateStart}'::DATE AS "FREEZING_PERIOD_START",
@@ -133,6 +134,7 @@ BASE_DETAILED_REPORT = """SELECT * FROM (
                                 )
                         p ON s.LIMIT_DEAL_ID = p.LIMIT_DEAL_ID
                 ) "custom_sql_query" ON ("dm_limit_contract"."LIMIT_DEAL_ID" = "custom_sql_query"."LIMIT_DEAL_ID")
+                WHERE "dm_limit_contract"."PARENT_ORGANIZATION_NAME_SHORT" = '{DoReport}'  
             ) AS final_data
             WHERE final_data."LIMIT_TOOL_CODE" = {ToolCode}
             and NOT(final_data."ORGANIZATION_NAME_LEGAL" IS NULL OR final_data."ORGANIZATION_NAME_LEGAL" = 'ЧАСТНАЯ КОМПАНИЯ BGLOBAL VENTURES LTD.')
@@ -143,6 +145,7 @@ BASE_DETAILED_REPORT = """SELECT * FROM (
 PROFITABILITY_REPORT_MAIN = """
     SELECT 
         '{SnapshotID}' as "SNAPSHOT_ID",
+        '{DoReport}' as "DO_REPORT",
         '{InitUser}' as "INIT",
         '{ApproverUser}' as "APPROVER",
         '{DateStart}' AS "FREEZING_PERIOD_START",
@@ -169,14 +172,16 @@ PROFITABILITY_REPORT_MAIN = """
         WHERE 
             "dm_limit_contract"."CURRENCY_CODE" = 'KZT' 
             AND "dm_limit_contract"."LIMIT_TOOL_CODE" = '{ToolCode}'
-            AND "dm_limit_contract"."DM_DATE" >= '{DateStart}::DATE'
-            AND "dm_limit_contract"."DM_DATE" <= '{DateEnd}::DATE'
+            AND "dm_limit_contract"."DM_DATE" >= '{DateStart}'::DATE
+            AND "dm_limit_contract"."DM_DATE" <= '{DateEnd}'::DATE
+            and "dm_limit_contract"."PARENT_ORGANIZATION_NAME_SHORT" = '{DoReport}'  
 """
 
 PROFITABILITY_REPORT_MAIN_CURRENCY = """
 SELECT * FROM (
     SELECT 
         '{SnapshotID}' as "SNAPSHOT_ID",
+        '{DoReport}' as "DO_REPORT",
         '{InitUser}' as "INIT",
         '{ApproverUser}' as "APPROVER",
         '{DateStart}' AS "FREEZING_PERIOD_START",
@@ -216,17 +221,20 @@ SELECT * FROM (
         ON 
             (("dm_limit_contract"."CURRENCY_CODE" = "t0"."currency_code") 
             AND ("dm_limit_contract"."DM_DATE" = "t0"."_temp0"))
+    WHERE "dm_limit_contract"."PARENT_ORGANIZATION_NAME_SHORT" = '{DoReport}'
 ) final_query
 WHERE final_query."LIMIT_TOOL_CODE" = '{ToolCode}'
             AND final_query."DM_DATE" >= '{DateStart}'::DATE
             AND final_query."DM_DATE" <= '{DateEnd}'::DATE
             AND final_query."CURRENCY_CODE" IS NOT NULL 
             AND final_query."CURRENCY_CODE" <> 'KZT'
+            
 """
 
 PROFITABILITY_REPORT_SECURITIES = """
 SELECT distinct 
     '{SnapshotID}' as "SNAPSHOT_ID",
+    '{DoReport}' as "DO_REPORT",
     '{InitUser}' as "INIT",
     '{ApproverUser}' as "APPROVER",
     '{DateStart}' AS "FREEZING_PERIOD_START",
@@ -258,12 +266,15 @@ SELECT distinct
     "dm_income_security"."START_SUM_LCY"
 FROM "DM"."DM_INCOME_SECURITY" "dm_income_security"
 WHERE "dm_income_security"."DM_DATE" = '{DateEnd}'::DATE
+AND "dm_income_security"."CURRENCY_CODE" {CurrencyFilter}
+AND "dm_income_security"."ORGANIZATION_NAME_SHORT" IN ({DoReportFilter})
 """
 
 PROFITABILITY_REPORT_SUMMARY = """
     SELECT * FROM
     (SELECT 
         '{SnapshotID}' as "SNAPSHOT_ID",
+        '{DoReport}' as "DO_REPORT",
         '{InitUser}' as "INIT",
         '{ApproverUser}' as "APPROVER",
         '{DateStart}' AS "FREEZING_PERIOD_START",
@@ -322,6 +333,7 @@ PROFITABILITY_REPORT_SUMMARY = """
         ON 
             (("dm_limit_contract"."CURRENCY_CODE" = "t0"."currency_code") 
             AND ("dm_limit_contract"."DM_DATE" = "t0"."_temp0"))
+    and "dm_limit_contract"."PARENT_ORGANIZATION_NAME_SHORT" = '{DoReport}'
     ) final_data
     WHERE final_data."DM_DATE" >= '{DateStart}'::DATE
     AND final_data."DM_DATE" <= '{DateEnd}'::DATE
@@ -390,11 +402,13 @@ REPORTS_SQL = {
     },
     "Слайд 5.5. Отчет по доходности ЦБ в тенге": {
         "template": PROFITABILITY_REPORT_SECURITIES,
-        "tool_code": 7  
+        "tool_code":  7  ,
+        "currency_filter": "= 'KZT'"
     },
     "Слайд 5.6. Отчет по доходности ЦБ в валюте": {
         "template": PROFITABILITY_REPORT_SECURITIES,
-        "tool_code": 7  
+        "tool_code":  7 ,
+        "currency_filter": "!= 'KZT'" 
     },
     "Слайд 5.7. Отчет по доходности операций репо": {
         "template": PROFITABILITY_REPORT_MAIN,

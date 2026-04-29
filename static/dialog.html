@@ -679,11 +679,7 @@
             <div class="field-block">
                 <label class="field-label" style="display:block; margin-bottom:6px;">Проверяющий</label>
                 <select id="approverSelect">
-                    <option value="tabladmin">Tableau Admin</option>
-                    <option value="drp_exp">Админ</option>
-                    <option value="a.assetov">Асетов Азамат</option>
-                    <option value="a-iskakov">Искаков Аспандияр</option>
-                    <option value="Iskakov_Aspandiyar_exp">Искаков Аспандияр (exp)</option>
+                    <option value="">Загрузка...</option>
                 </select>
             </div>
 
@@ -723,6 +719,7 @@
 <script>
     let globalPayload = {};
     let isAdmin = false; 
+    let isApprover = false;
     let allTasksCache = [];
     let depsBlocingRequest = false;
     let duplicateBlocking  = false;
@@ -836,7 +833,7 @@
 
         let data;
         try {
-            const url = `${API_BASE}/check-dependencies?report=${encodeURIComponent(report)}&period_start=${encodeURIComponent(periodStart)}&period_end=${encodeURIComponent(periodEnd)}`;
+            const url = `${API_BASE}/check-dependencies?report=${encodeURIComponent(report)}&period_start=${encodeURIComponent(periodStart)}&period_end=${encodeURIComponent(periodEnd)}&user=${encodeURIComponent(globalPayload.user)}`;
             const res = await fetch(url);
             data = await res.json();
         } catch (e) {
@@ -875,6 +872,17 @@
     // --- ИНИЦИАЛИЗАЦИЯ ---
     tableau.extensions.initializeDialogAsync().then(async function (payload) {
         globalPayload = JSON.parse(payload);
+        try {
+            const approversRes = await fetch(`${API_BASE}/approvers-for-user?user=${encodeURIComponent(globalPayload.user)}&t=${Date.now()}`);
+            const approversData = await approversRes.json();
+            
+            const select = document.getElementById('approverSelect');
+            select.innerHTML = approversData.approvers
+                .map(a => `<option value="${a.value}">${a.label}</option>`)
+                .join('');
+        } catch(e) {
+            console.error("Approvers load error", e);
+        }
         document.getElementById('reportName').innerText = globalPayload.dashboard;
         
         try {
@@ -885,9 +893,22 @@
 
         document.getElementById('userName').innerHTML = ` ${globalPayload.user} ${isAdmin ? '<span class="admin-badge">ADMIN</span>' : ''}`;
 
+        try {
+            const approverRes = await fetch(`${API_BASE}/check-approver?user=${globalPayload.user}&t=${Date.now()}`);
+            const approverData = await approverRes.json();
+            isApprover = approverData.is_approver;
+        } catch (e) { console.error("Approver check error", e); }
+
+        document.getElementById('userName').innerHTML = ` ${globalPayload.user} ${isApprover ? '<span class="admin-badge">APPROVER</span>' : ''}`;
+
+
         if (isAdmin) {
             document.getElementById('tab-pending').classList.remove('hidden');
             document.getElementById('tab-archive').classList.remove('hidden');
+        }
+
+        if (isApprover) {
+            document.getElementById('tab-pending').classList.remove('hidden');
         }
 
         const effPeriod = resolveEffectivePeriod(globalPayload.dashboard, globalPayload.params || {});
@@ -908,36 +929,44 @@
             
             document.getElementById('pending-container').innerHTML = "";
             document.getElementById('archive-container').innerHTML = "";
-
+    
             const resPending = await fetch(`${API_BASE}/pending-tasks?user=${user}&t=${ts}`);
             const pendingTasks = await resPending.json();
-
-            if (isAdmin) {
+    
+            if (isAdmin || isApprover) {
                 const resApproved = await fetch(`${API_BASE}/approved-tasks?t=${ts}`);
                 allTasksCache = await resApproved.json();
             }
-
+    
             document.getElementById('loader').classList.add('hidden');
-
+    
             fillInitiatorParams(effPeriod);
-
+    
             if (pendingTasks.length > 0) {
                 renderTasksTo(pendingTasks, 'pending-container', false);
-                if (isAdmin) showTab('pending');
+                if (isAdmin || isApprover) showTab('pending');
             } else {
                 document.getElementById('pending-container').innerHTML = '<div style="text-align:center;color:#999;padding:20px;">Нет активных задач</div>';
             }
-
+    
             if (isAdmin && allTasksCache.length > 0) {
                 renderTasksTo(allTasksCache, 'archive-container', true);
             }
-
+    
+            // Проверяем дубликат напрямую в БД по отчёт+период+ДО
             const currentPeriod = `${effPeriod.start}_${effPeriod.end}`;
-            const isDuplicate = [...pendingTasks, ...allTasksCache].some(t => 
-                t.REPORT_NAME === globalPayload.dashboard && t.PERIOD === currentPeriod && (t.STATUS === "APPROVED" || t.STATUS === "PENDING")
-            );
-            if (isDuplicate) showDuplicateWarning(currentPeriod);
-
+            try {
+                const dupRes = await fetch(
+                    `${API_BASE}/check-duplicate?report=${encodeURIComponent(globalPayload.dashboard)}&period_start=${encodeURIComponent(effPeriod.start)}&period_end=${encodeURIComponent(effPeriod.end)}&user=${encodeURIComponent(user)}&t=${ts}`
+                );
+                const dupData = await dupRes.json();
+                if (dupData.is_duplicate) {
+                    showDuplicateWarning(currentPeriod, dupData);
+                }
+            } catch(e) {
+                console.error("Duplicate check error", e);
+            }
+    
         } catch (e) {
             document.getElementById('loader').innerText = "Ошибка связи с API";
         }
@@ -1067,12 +1096,17 @@
         renderTasksTo(filtered, 'archive-container', true);
     }
 
-    function showDuplicateWarning(period) {
+    function showDuplicateWarning(period, dupData) {
         duplicateBlocking = true;
         syncRequestBtn();
-
+    
+        const statusText = dupData.status === "APPROVED" 
+            ? "уже подтверждён" 
+            : `ожидает подтверждения от ${dupData.approver_user}`;
+    
         const warning = `<div style="background:#fff4f4;border:1px solid #f5c6cb;padding:10px;border-radius:6px;margin-bottom:10px;color:#721c24;font-size:13px;">
-            <strong>⚠️ Внимание:</strong> Срез за период <u>${period}</u> уже существует.
+            <strong>⚠️ Внимание:</strong> Срез за период <u>${period}</u> ${statusText}.<br>
+            Инициатор: <b>${dupData.init_user}</b>.<br>
             Чтобы создать новый — аннулируйте существующий в разделе «Архив».
         </div>`;
         document.getElementById('periodInfo').insertAdjacentHTML('beforebegin', warning);

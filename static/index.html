@@ -134,7 +134,22 @@
         const status = document.getElementById('status');
         const userBadge = document.getElementById('user-info');
         
-        const tableauUser = tableau.extensions.environment.username || "tabladmin";
+        let tableauUser = "unknown";
+        const uid = tableau.extensions.environment._uniqueUserId;
+        
+        const resp = await fetch(`/whoami?uid=${uid}`);
+        const data = await resp.json();
+        
+        if (data.username) {
+            tableauUser = data.username;
+        } else {
+            // Первый заход — спросить и сохранить
+            const name = prompt("Введите ваш Tableau логин (один раз):");
+            if (name) {
+                await fetch(`/whoami/register?uid=${uid}&name=${encodeURIComponent(name)}`, {method: 'POST'});
+                tableauUser = name;
+            }
+        }
         userBadge.innerText = `Пользователь: ${tableauUser}`;
 
         btn.disabled = false;
@@ -167,7 +182,7 @@
             };
 
             const dialogUrl = window.location.origin + '/static/dialog.html';
-            tableau.extensions.ui.displayDialogAsync(dialogUrl, JSON.stringify(payload), { height: 800, width: 500 })
+            tableau.extensions.ui.displayDialogAsync(dialogUrl, JSON.stringify(payload), { height: 900, width: 500 })
                 .then((msg) => status.innerText = "✅ " + msg)
                 .finally(() => btn.disabled = false);
         };
