@@ -1174,6 +1174,11 @@
         } catch (e) { alert("Ошибка!"); this.disabled = false; }
     };
 
+    const ALLOWED_RELOAD_USERS = new Set([
+        'tabladmin',
+        'drp_exp'
+    ]);
+
     async function processBulkApprove() {
         const selectedChecks = Array.from(document.querySelectorAll('.task-checkbox:checked'));
         if (!confirm(`Подтвердить выбранные (${selectedChecks.length})?`)) return;
@@ -1206,9 +1211,18 @@
                     throw new Error(errText || `Ошибка подтверждения задачи ${id}`);
                 }
             }
-            tableau.extensions.ui.closeDialog("Срез подтвержден");
+            
+            // Проверка: если пользователь в разрешенном списке, обновляем окно
+            const currentUser = globalPayload.user;
+            if (ALLOWED_RELOAD_USERS.has(currentUser)) {
+                location.reload();
+            } else {
+                // Иначе просто закрываем диалог
+                tableau.extensions.ui.closeDialog("Срез подтвержден");
+            }
         } catch (e) { alert("Ошибка при подтверждении"); }
     }
+
 
     window.addEventListener('load', () => {
         const firstActive = document.querySelector('.tab.active');
