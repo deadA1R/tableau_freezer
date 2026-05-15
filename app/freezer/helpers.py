@@ -1,4 +1,4 @@
-# -*- coding: cp1251 -*-
+# -*- coding: utf-8 -*-
 import uuid
 from datetime import datetime as dt
 from typing import Any

@@ -922,6 +922,21 @@
         checkWorkflowStatus(effPeriod);
     });
 
+    async function refreshDialog() {
+        // Обновляет окно без потери payload данных
+        const effPeriod = resolveEffectivePeriod(globalPayload.dashboard, globalPayload.params || {});
+        checkAndRenderDependencies(
+            globalPayload.dashboard,
+            effPeriod.start,
+            effPeriod.end
+        );
+        await checkWorkflowStatus(effPeriod);
+        
+        // Очищаем форму и переключаемся на таб создания среза
+        document.getElementById('comment').value = '';
+        showTab('create');
+    }
+
     async function checkWorkflowStatus(effPeriod) {
         try {
             const user = globalPayload.user;
@@ -1215,7 +1230,7 @@
             // Проверка: если пользователь в разрешенном списке, обновляем окно
             const currentUser = globalPayload.user;
             if (ALLOWED_RELOAD_USERS.has(currentUser)) {
-                location.reload();
+                await refreshDialog();
             } else {
                 // Иначе просто закрываем диалог
                 tableau.extensions.ui.closeDialog("Срез подтвержден");

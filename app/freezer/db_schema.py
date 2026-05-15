@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 from app.freezer.db_sqlite import SQLiteBackend
 from app.freezer.db_vertica import VerticaBackend

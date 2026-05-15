@@ -1,4 +1,4 @@
-# -*- coding: cp1251 -*-
+# -*- coding: utf-8 -*-
 from dotenv import load_dotenv
 
 from app.freezer.db_schema import FreezerSchemaMixin

@@ -1,4 +1,4 @@
-# -*- coding: cp1251 -*-
+# -*- coding: utf-8 -*-
 import json
 import os
 import uuid
@@ -359,6 +359,84 @@ class FreezerWorkflowMixin:
             print(f"[5.8] Результат выгрузки: {summary_result}")
 
         return {"success": True, "summary_saved": summary_result}
+
+    def _approve_tasks(self, task_ids: list[str], current_user: str) -> dict[str, Any]:
+        """Batch approval of multiple tasks by a single approver."""
+        unique_task_ids = [task_id for task_id in dict.fromkeys(task_ids) if task_id]
+        if not unique_task_ids:
+            return {"success": False, "message": "Список задач пуст"}
+
+        schema = os.getenv("VERTICA_SCHEMA", "DM")
+        try:
+            with self._get_db_connection() as conn:
+                with conn.cursor("dict") as cursor:
+                    # Pre-check all tasks
+                    tasks_to_approve = []
+                    for task_id in unique_task_ids:
+                        cursor.execute(f"SELECT * FROM {schema}.FREEZE_WORKFLOW WHERE TASK_ID = %s", (task_id,))
+                        task = cursor.fetchone()
+
+                        if not task:
+                            return {"success": False, "message": f"Задача {task_id} не найдена"}
+                        if task["APPROVER_USER"] != current_user:
+                            return {"success": False, "message": f"Нужен аппрув от {task['APPROVER_USER']}"}
+                        if task["STATUS"] != WorkflowStatus.PENDING.value:
+                            return {"success": False, "message": f"Статус: {task['STATUS']}"}
+
+                        db_name = task["REPORT_NAME"]
+                        report_meta = REPORTS_SQL.get(db_name)
+                        if not report_meta:
+                            return {"success": False, "message": f"Отчет '{db_name}' не найден в реестре"}
+
+                        tasks_to_approve.append((task, report_meta))
+
+                    # Process all tasks
+                    now = dt.now()
+                    summary_jobs = []
+
+                    for task, report_meta in tasks_to_approve:
+                        db_name = task["REPORT_NAME"]
+                        final_sql = self._build_vertica_sql(task, report_meta)
+                        target_table = _get_frozen_table(db_name)
+                        print(f"[freeze] Отчет: {db_name!r} -> таблица: {schema}.{target_table}")
+
+                        if not self._is_sqlite_backend():
+                            cursor.execute(
+                                f"""
+                                INSERT INTO {schema}.{target_table}
+                                {final_sql}
+                            """
+                            )
+                            print(f"✅ Заморозка выполнена для {db_name}")
+
+                        cursor.execute(
+                            f"UPDATE {schema}.FREEZE_WORKFLOW SET STATUS = %s, DATE_APPROVE = %s WHERE TASK_ID = %s",
+                            (WorkflowStatus.APPROVED.value, now, task["TASK_ID"]),
+                        )
+
+                        summary_jobs.append(dict(task))
+
+        except Exception as e:
+            print(f"КРИТИЧЕСКАЯ ОШИБКА В _approve_tasks: {e}")
+            return {"success": False, "message": str(e)}
+
+        # Post-process for 5.8 reports
+        summary_results = []
+        for task_dict in summary_jobs:
+            if task_dict.get("REPORT_NAME") == REPORT_5_8_NAME:
+                print("[5.8] Начинаем выгрузку данных из Tableau...")
+                try:
+                    summary_result = self._fetch_and_save_summary_report(task_dict, now)
+                except Exception as e:
+                    summary_result = {"saved": False, "reason": str(e)}
+                print(f"[5.8] Результат выгрузки: {summary_result}")
+                summary_results.append({"task_id": task_dict.get("TASK_ID"), "result": summary_result})
+
+        return {
+            "success": True,
+            "approved_task_ids": unique_task_ids,
+            "summary_saved": summary_results,
+        }
 
     def _build_vertica_sql(self, task, base_sql: dict[str, Any]) -> str:
         params = json.loads(task["PARAMS_JSON"])
